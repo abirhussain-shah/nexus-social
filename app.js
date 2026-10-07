@@ -976,7 +976,20 @@ function listenToCloudPosts() {
       if (snapshot.empty) return;
       const cloudPosts = [];
       snapshot.forEach(doc => {
-        cloudPosts.push({ id: doc.id, ...doc.data() });
+        const d = doc.data();
+        const me = state.currentUser ? state.currentUser.id : 'you';
+        const likedBy = d.likedBy || [];
+        const local = state.posts.find(p => p.id === doc.id);
+        cloudPosts.push({
+          ...d,
+          id: doc.id,
+          likedBy,
+          likes: likedBy.length,
+          likedByMe: likedBy.includes(me),
+          comments: d.comments || [],
+          shares: d.shares || 0,
+          showComments: local ? !!local.showComments : false
+        });
       });
       if (cloudPosts.length > 0) {
         const cloudIds = new Set(cloudPosts.map(p => p.id));
@@ -1015,6 +1028,10 @@ function listenToCloudMessages() {
           }
         } else if (msg.to === currentId) {
           const peer = msg.from;
+          if (state.dmSettings[peer] && state.dmSettings[peer].deleted) {
+            state.dmSettings[peer].deleted = false;
+            saveDMSettings();
+          }
           if (!state.dmMessages[peer]) state.dmMessages[peer] = [];
           if (!state.dmMessages[peer].some(m => m.id === doc.id || (m.timestamp && m.timestamp === msg.timestamp))) {
             state.dmMessages[peer].push({ ...msg, id: doc.id });
@@ -1548,6 +1565,13 @@ function toggleLike(postId) {
   post.likedByMe = !post.likedByMe;
   post.likes += post.likedByMe ? 1 : -1;
   savePosts(state.posts);
+  if (db) {
+    const me = state.currentUser ? state.currentUser.id : 'you';
+    const FV = firebase.firestore.FieldValue;
+    db.collection('posts').doc(postId).update({
+      likedBy: post.likedByMe ? FV.arrayUnion(me) : FV.arrayRemove(me)
+    }).catch(err => console.warn('Like sync warning:', err));
+  }
   refreshPost(postId);
   showToast(post.likedByMe ? '❤️ You liked this post!' : '💔 Unliked');
 }
@@ -1568,8 +1592,14 @@ function addComment(postId) {
   if (!text) return;
 
   const currentId = state.currentUser ? state.currentUser.id : 'you';
-  post.comments.push({ user: currentId, text, time: 'Just now' });
+  const comment = { user: currentId, text, time: 'Just now', timestamp: Date.now() };
+  post.comments.push(comment);
   savePosts(state.posts);
+  if (db) {
+    db.collection('posts').doc(postId).update({
+      comments: firebase.firestore.FieldValue.arrayUnion(comment)
+    }).catch(err => console.warn('Comment sync warning:', err));
+  }
   refreshPost(postId);
   showToast('💬 Comment posted!');
 }
@@ -1579,6 +1609,11 @@ function sharePost(postId) {
   if (post) {
     post.shares = (post.shares || 0) + 1;
     savePosts(state.posts);
+    if (db) {
+      db.collection('posts').doc(postId).update({
+        shares: firebase.firestore.FieldValue.increment(1)
+      }).catch(err => console.warn('Share sync warning:', err));
+    }
     refreshPost(postId);
   }
   showToast('📤 Post shared with your followers!');
