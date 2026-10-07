@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexus Social — Home</title>
+  <meta name="description"
+    content="Nexus Social — share posts, vlogs, and blogs with your community. Connect and message friends." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+  <!-- ===== AUTH SCREEN ===== -->
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-orb auth-orb-1"></div>
+    <div class="auth-orb auth-orb-2"></div>
+    <div class="auth-orb auth-orb-3"></div>
+    <div class="auth-card">
+      <div class="auth-logo">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        Nexus Social
+      </div>
+
+      <!-- LOGIN -->
+      <div class="auth-panel active" id="auth-login">
+        <div class="auth-error" id="login-error"></div>
+        <div class="auth-field"><label>Email Address</label><input type="email" id="login-email"
+            placeholder="you@example.com" autocomplete="email" /></div>
+        <div class="auth-field"><label>Password</label><input type="password" id="login-password" placeholder="••••••••"
+            autocomplete="current-password" /></div>
+        <div class="auth-options"><button class="auth-text-btn" onclick="switchAuthPanel('forgot')">Forgot
+            password?</button></div>
+        <button class="auth-primary-btn" onclick="handleLogin()">Sign In</button>
+        <p class="auth-footer-text">Don't have an account? <button class="auth-text-btn"
+            onclick="switchAuthPanel('register')">Sign up →</button></p>
+      </div>
+
+      <!-- REGISTER -->
+      <div class="auth-panel" id="auth-register">
+        <div class="auth-head">
+          <h2>Create account ✨</h2>
+          <p>Join Nexus and connect with friends</p>
+        </div>
+        <div class="auth-error" id="register-error"></div>
+        <div class="auth-field"><label>Full Name</label><input type="text" id="reg-name" placeholder="Jane Doe"
+            autocomplete="name" /></div>
+        <div class="auth-field"><label>Email Address</label><input type="email" id="reg-email"
+            placeholder="you@example.com" autocomplete="email" /></div>
+        <div class="auth-fields-row">
+          <div class="auth-field"><label>Password</label><input type="password" id="reg-password"
+              placeholder="Min. 6 chars" autocomplete="new-password" /></div>
+          <div class="auth-field"><label>Confirm</label><input type="password" id="reg-confirm" placeholder="Repeat"
+              autocomplete="new-password" /></div>
+        </div>
+        <button class="auth-primary-btn" onclick="handleRegister()">Create Account</button>
+        <p class="auth-footer-text">Already have an account? <button class="auth-text-btn"
+            onclick="switchAuthPanel('login')">Sign in →</button></p>
+      </div>
+
+      <!-- FORGOT PASSWORD -->
+      <div class="auth-panel" id="auth-forgot">
+        <button class="auth-back-btn" onclick="switchAuthPanel('login')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 12H5M12 5l-7 7 7 7" />
+          </svg>
+          Back to sign in
+        </button>
+        <div class="auth-head">
+          <h2>Reset password 🔑</h2>
+          <p>Enter your email and choose a new password</p>
+        </div>
+        <div class="auth-error" id="forgot-error"></div>
+        <div id="forgot-form-body">
+          <div class="auth-field"><label>Registered Email Address</label><input type="email" id="forgot-email"
+              placeholder="you@example.com" autocomplete="email" /></div>
+          <div class="auth-field"><label>New Password</label><input type="password" id="forgot-password"
+              placeholder="At least 6 characters" autocomplete="new-password" /></div>
+          <div class="auth-field"><label>Confirm New Password</label><input type="password" id="forgot-confirm"
+              placeholder="Repeat new password" autocomplete="new-password" /></div>
+          <button class="auth-primary-btn" onclick="handleForgotPassword()">Reset & Update Password</button>
+        </div>
+        <div class="auth-success-msg" id="forgot-success" style="display:none">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="1.5">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+          <strong>Password Updated! 🎉</strong>
+          <p>Your password has been reset successfully. You can now sign in using your new credentials.</p>
+          <button class="auth-primary-btn" onclick="switchAuthPanel('login')">Return to Sign In</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TOP NAV ===== -->
+  <header class="topnav" id="topnav">
+    <div class="nav-left">
+      <div class="brand">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        Nexus
+      </div>
+      <div class="nav-search-box">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8" />
+          <path d="m21 21-4.35-4.35" />
+        </svg>
+        <input type="text" id="global-search" placeholder="Search Nexus…" autocomplete="off" />
+      </div>
+    </div>
+
+    <nav class="nav-center" id="nav-center">
+      <button class="nav-tab active" data-view="feed" id="tab-feed" title="Home Feed">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <polyline points="9 22 9 12 15 12 15 22" />
+        </svg>
+        <span>Home</span>
+      </button>
+
+      <button class="nav-tab" data-view="messages" id="tab-messages" title="Messages">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        <span>Messages</span>
+        <span class="nav-badge" id="msg-nav-badge">3</span>
+      </button>
+    </nav>
+
+    <div class="nav-right">
+      <button class="icon-btn" id="notif-btn" title="Notifications">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+        <span class="notif-dot" id="notif-dot"></span>
+      </button>
+      <button class="icon-btn" id="logout-btn" title="Log Out" onclick="logout()" style="color:var(--text-2)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <polyline points="16 17 21 12 16 7" />
+          <line x1="21" y1="12" x2="9" y2="12" />
+        </svg>
+      </button>
+      <div class="nav-avatar" id="nav-avatar" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)"
+        title="My Profile">Y</div>
+    </div>
+  </header>
+
+  <!-- ===== MAIN APP ===== -->
+  <div class="main-layout" id="main-layout">
+
+    <!-- LEFT SIDEBAR -->
+    <aside class="left-sidebar" id="left-sidebar">
+      <div class="sidebar-profile">
+        <div class="profile-avatar" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)">Y<div
+            class="status-dot online"></div>
+        </div>
+        <div class="profile-info">
+          <div class="profile-name">You</div>
+          <div class="profile-handle">@you · Active</div>
+        </div>
+      </div>
+
+      <nav class="left-nav">
+        <button class="left-nav-item active" data-view="feed" id="lnav-feed">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          </svg>
+          News Feed
+        </button>
+
+        <button class="left-nav-item" data-view="messages" id="lnav-messages">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+          Messages
+          <span class="lnav-badge">3</span>
+        </button>
+        <button class="left-nav-item" data-view="profile" id="lnav-profile">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+          My Profile
+        </button>
+        <button class="left-nav-item" data-view="settings" id="lnav-settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          Settings
+        </button>
+        <button class="left-nav-item" data-view="saved" id="lnav-saved">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+          </svg>
+          Saved Posts
+        </button>
+      </nav>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-section-label">People You Know</div>
+      <ul class="friends-list" id="friends-list">
+        <li class="friend-item" data-user="sarah">
+          <div class="friend-avatar" style="background:linear-gradient(135deg,#a855f7,#6366f1)">S<div
+              class="status-dot online"></div>
+          </div>
+          <div class="friend-info"><span class="fname">Sarah K.</span><span class="fstatus">Active now</span></div>
+          <button class="msg-friend-btn" data-user="sarah" title="Message">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+        </li>
+        <li class="friend-item" data-user="maya">
+          <div class="friend-avatar" style="background:linear-gradient(135deg,#f97316,#eab308)">M<div
+              class="status-dot online"></div>
+          </div>
+          <div class="friend-info"><span class="fname">Maya T.</span><span class="fstatus">Active now</span></div>
+          <button class="msg-friend-btn" data-user="maya" title="Message">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+        </li>
+        <li class="friend-item" data-user="leo">
+          <div class="friend-avatar" style="background:linear-gradient(135deg,#10b981,#06b6d4)">Le<div
+              class="status-dot online"></div>
+          </div>
+          <div class="friend-info"><span class="fname">Leo B.</span><span class="fstatus">Active 5m ago</span></div>
+          <button class="msg-friend-btn" data-user="leo" title="Message">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+        </li>
+        <li class="friend-item" data-user="liam">
+          <div class="friend-avatar" style="background:linear-gradient(135deg,#3b82f6,#06b6d4)">L<div
+              class="status-dot offline"></div>
+          </div>
+          <div class="friend-info"><span class="fname">Liam R.</span><span class="fstatus">Offline</span></div>
+          <button class="msg-friend-btn" data-user="liam" title="Message">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+        </li>
+        <li class="friend-item" data-user="zoe">
+          <div class="friend-avatar" style="background:linear-gradient(135deg,#ec4899,#f43f5e)">Z<div
+              class="status-dot offline"></div>
+          </div>
+          <div class="friend-info"><span class="fname">Zoe P.</span><span class="fstatus">Offline</span></div>
+          <button class="msg-friend-btn" data-user="zoe" title="Message">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+        </li>
+      </ul>
+    </aside>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="content-area" id="content-area">
+
+      <!-- ── FEED VIEW ── -->
+      <section class="view active" id="view-feed">
+        <!-- Create Post Box -->
+        <div class="create-post-card" id="create-post-card">
+          <div class="create-post-top">
+            <div class="cp-avatar" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)">Y</div>
+            <button class="cp-input-btn" id="open-post-modal-btn">What's on your mind?</button>
+          </div>
+          <div class="create-post-types">
+
+            <button class="post-type-btn" id="quick-photo-btn">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+              Photo
+            </button>
+          </div>
+        </div>
+
+        <!-- Feed Posts -->
+        <div class="posts-feed" id="posts-feed">
+          <!-- Injected by JS -->
+        </div>
+      </section>
+
+
+
+      <!-- ── MESSAGES VIEW ── -->
+      <section class="view messages-view" id="view-messages">
+        <div class="msg-sidebar">
+          <div class="msg-sidebar-header">
+            <button class="chat-home-btn" title="Back to Home Feed" onclick="switchView('feed')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
+              </svg>
+              <span>Home Feed</span>
+            </button>
+            <h3>Chats</h3>
+            <button class="icon-btn" id="new-msg-btn" title="New Message">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </button>
+          </div>
+          <div class="msg-search-box">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.35-4.35" />
+            </svg>
+            <input type="text" placeholder="Search messages…" id="msg-search" />
+          </div>
+          <ul class="dm-list" id="dm-list">
+            <li class="dm-item active" data-user="sarah">
+              <div class="dm-avatar" style="background:linear-gradient(135deg,#a855f7,#6366f1)">S<div
+                  class="status-dot online"></div>
+              </div>
+              <div class="dm-info">
+                <span class="dm-name">Sarah K.</span>
+                <span class="dm-preview">Hey! Can we chat about Q4?</span>
+              </div>
+              <div class="dm-meta">
+                <span class="dm-time">2m</span>
+                <span class="dm-unread">2</span>
+              </div>
+            </li>
+            <li class="dm-item" data-user="maya">
+              <div class="dm-avatar" style="background:linear-gradient(135deg,#f97316,#eab308)">M<div
+                  class="status-dot online"></div>
+              </div>
+              <div class="dm-info">
+                <span class="dm-name">Maya T.</span>
+                <span class="dm-preview">Love the new design! 😍</span>
+              </div>
+              <div class="dm-meta">
+                <span class="dm-time">1h</span>
+              </div>
+            </li>
+            <li class="dm-item" data-user="liam">
+              <div class="dm-avatar" style="background:linear-gradient(135deg,#3b82f6,#06b6d4)">L<div
+                  class="status-dot offline"></div>
+              </div>
+              <div class="dm-info">
+                <span class="dm-name">Liam R.</span>
+                <span class="dm-preview">I'll check the API docs later</span>
+              </div>
+              <div class="dm-meta">
+                <span class="dm-time">3h</span>
+                <span class="dm-unread">1</span>
+              </div>
+            </li>
+            <li class="dm-item" data-user="leo">
+              <div class="dm-avatar" style="background:linear-gradient(135deg,#10b981,#06b6d4)">Le<div
+                  class="status-dot online"></div>
+              </div>
+              <div class="dm-info">
+                <span class="dm-name">Leo B.</span>
+                <span class="dm-preview">Let's do it! ✨</span>
+              </div>
+              <div class="dm-meta">
+                <span class="dm-time">Yesterday</span>
+              </div>
+            </li>
+            <li class="dm-item" data-user="zoe">
+              <div class="dm-avatar" style="background:linear-gradient(135deg,#ec4899,#f43f5e)">Z<div
+                  class="status-dot offline"></div>
+              </div>
+              <div class="dm-info">
+                <span class="dm-name">Zoe P.</span>
+                <span class="dm-preview">Great idea!</span>
+              </div>
+              <div class="dm-meta">
+                <span class="dm-time">2d</span>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Chat Panel -->
+        <div class="chat-panel" id="chat-panel">
+          <div class="chat-panel-header" id="chat-panel-header">
+            <div class="chat-peer-info">
+              <button class="chat-home-btn chat-panel-home-btn" title="Back to Home Feed" onclick="switchView('feed')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  <polyline points="9 22 9 12 15 12 15 22" />
+                </svg>
+                <span>Home</span>
+              </button>
+              <div class="chat-peer-avatar" id="chat-peer-avatar"
+                style="background:linear-gradient(135deg,#a855f7,#6366f1)">S<div class="status-dot online"></div>
+              </div>
+              <div>
+                <div class="chat-peer-name" id="chat-peer-name">Sarah K.</div>
+                <div class="chat-peer-status" id="chat-peer-status">Active now</div>
+              </div>
+            </div>
+            <div class="chat-panel-actions">
+              <button class="icon-btn" title="Voice Call"
+                onclick="showToast('📞 Calling ' + document.getElementById('chat-peer-name').textContent + '…')">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path
+                    d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.65 3.38 2 2 0 0 1 3.62 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.69a16 16 0 0 0 6 6l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+                </svg>
+              </button>
+              <button class="icon-btn" title="Video Call"
+                onclick="showToast('📹 Video calling ' + document.getElementById('chat-peer-name').textContent + '…')">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="23 7 16 12 23 17 23 7" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="chat-messages" id="chat-messages">
+            <!-- Injected by JS -->
+          </div>
+          <div class="chat-input-area">
+            <button class="toolbar-btn" id="chat-attach-btn" title="Attach">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
+            <div class="chat-input" id="chat-input" contenteditable="true" data-placeholder="Message Sarah K.…"></div>
+            <button class="toolbar-btn emoji-chat-btn" id="chat-emoji-btn" title="Emoji">😊</button>
+            <button class="send-btn" id="chat-send-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── PROFILE VIEW ── -->
+      <section class="view" id="view-profile">
+        <div class="profile-page">
+          <div class="profile-cover" style="background: linear-gradient(135deg, #4c1d95, #7c3aed, #ec4899)">
+            <div class="cover-overlay"></div>
+          </div>
+          <div class="profile-body" style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
+            <div style="flex:1; min-width:300px;">
+              <div class="profile-hero" style="margin-bottom: 20px;">
+                <div class="profile-hero-avatar" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)">Y</div>
+                <div class="profile-hero-info">
+                  <h1 class="profile-hero-name">You</h1>
+                  <p class="profile-hero-bio">Software Engineer | Building products for the future ✨</p>
+                  <div class="profile-stats">
+                    <div class="stat"><span class="stat-n" id="stat-posts">0</span><span class="stat-l">Posts</span>
+                    </div>
+                    <div class="stat"><span class="stat-n">128</span><span class="stat-l">Following</span></div>
+                    <div class="stat"><span class="stat-n">2.4K</span><span class="stat-l">Followers</span></div>
+                  </div>
+                </div>
+                <button class="btn-primary" id="edit-profile-btn">Edit Profile</button>
+              </div>
+
+              <!-- About Card -->
+              <div class="about-card"
+                style="background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom: 20px;">
+                <h3 style="margin-bottom:15px; font-size:16px; font-weight:600;">About Me</h3>
+                <ul
+                  style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:12px; color:var(--text-2); font-size:14px;">
+                  <li style="display:flex; align-items:center; gap:8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                      <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
+                    Lives in <strong>San Francisco, CA</strong>
+                  </li>
+                  <li style="display:flex; align-items:center; gap:8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                    </svg>
+                    Works at <strong>Nexus Inc.</strong>
+                  </li>
+                  <li style="display:flex; align-items:center; gap:8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                    </svg>
+                    Studied Computer Science at <strong>Stanford University</strong>
+                  </li>
+                  <li style="display:flex; align-items:center; gap:8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                    </svg>
+                    <a href="#" style="color:var(--accent); text-decoration:none;">nexus.dev</a>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="profile-posts" id="profile-posts" style="flex:2; min-width:400px; margin-top:0;">
+              <!-- My posts injected by JS -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── SAVED POSTS VIEW ── -->
+      <section class="view" id="view-saved">
+        <div class="view-header">
+          <h2 class="view-title">Saved Posts</h2>
+        </div>
+        <div class="posts-feed" id="saved-posts-feed">
+          <p style="color:var(--text-3);text-align:center;padding:32px;">No posts saved yet. Bookmark posts you want to
+            find later! 🔖</p>
+        </div>
+      </section>
+
+      <!-- ── SETTINGS VIEW ── -->
+      <section class="view" id="view-settings">
+        <div class="settings-page"
+          style="background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:24px;">
+          <h2 style="margin-bottom:20px; font-size:22px; font-weight:800;">Settings</h2>
+
+          <div class="settings-section" style="margin-bottom: 24px;">
+            <h3
+              style="font-size:16px; font-weight:700; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+              Appearance</h3>
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0;">
+              <div>
+                <div style="font-weight:600; font-size:14px;">Theme</div>
+                <div style="font-size:12px; color:var(--text-3);">Toggle between Dark and Light mode</div>
+              </div>
+              <label class="theme-switch" style="position:relative; display:inline-block; width:50px; height:26px;">
+                <input type="checkbox" id="theme-toggle" style="opacity:0; width:0; height:0;">
+                <span class="slider round"
+                  style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:var(--bg-input); transition:.4s; border-radius:34px; border:1px solid var(--border);"></span>
+                <span class="slider-circle" id="theme-slider-circle"
+                  style="position:absolute; content:''; height:18px; width:18px; left:4px; bottom:3px; background-color:var(--text-1); transition:.4s; border-radius:50%; z-index:1; pointer-events:none;"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-section" style="margin-bottom: 24px;">
+            <h3
+              style="font-size:16px; font-weight:700; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+              Account Details</h3>
+            <div style="display:flex; flex-direction:column; gap:16px; padding:12px 0;">
+              <div>
+                <label style="font-weight:600; font-size:13px; margin-bottom:6px; display:block;">Email Address</label>
+                <input type="email" value="you@nexus.dev"
+                  style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-input); color:var(--text-1);"
+                  disabled>
+              </div>
+              <div>
+                <label style="font-weight:600; font-size:13px; margin-bottom:6px; display:block;">Username</label>
+                <input type="text" value="@you"
+                  style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg-input); color:var(--text-1);">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section" style="margin-bottom: 24px;">
+            <h3
+              style="font-size:16px; font-weight:700; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+              Privacy & Safety</h3>
+            <div
+              style="display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--border);">
+              <div>
+                <div style="font-weight:600; font-size:14px;">Private Account</div>
+                <div style="font-size:12px; color:var(--text-3);">Only approved followers can see your posts</div>
+              </div>
+              <label class="theme-switch" style="position:relative; display:inline-block; width:50px; height:26px;">
+                <input type="checkbox" style="opacity:0; width:0; height:0;">
+                <span class="slider round"
+                  style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:var(--bg-input); transition:.4s; border-radius:34px; border:1px solid var(--border);"></span>
+                <span class="slider-circle"
+                  style="position:absolute; content:''; height:18px; width:18px; left:4px; bottom:3px; background-color:var(--text-1); transition:.4s; border-radius:50%; z-index:1; pointer-events:none;"></span>
+              </label>
+            </div>
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0;">
+              <div>
+                <div style="font-weight:600; font-size:14px;">Activity Status</div>
+                <div style="font-size:12px; color:var(--text-3);">Let others see when you are active</div>
+              </div>
+              <label class="theme-switch" style="position:relative; display:inline-block; width:50px; height:26px;">
+                <input type="checkbox" checked style="opacity:0; width:0; height:0;">
+                <span class="slider round"
+                  style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background-color:var(--bg-input); transition:.4s; border-radius:34px; border:1px solid var(--border);"></span>
+                <span class="slider-circle"
+                  style="position:absolute; content:''; height:18px; width:18px; left:4px; bottom:3px; background-color:var(--text-1); transition:.4s; border-radius:50%; z-index:1; pointer-events:none;"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3
+              style="font-size:16px; font-weight:700; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:8px;">
+              Notifications</h3>
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0;">
+              <div style="font-weight:600; font-size:14px;">Push Notifications</div>
+              <button class="btn-primary"
+                style="padding:6px 12px; font-size:12px; background:var(--bg-input); color:var(--text-1); border:1px solid var(--border); border-radius:6px; cursor:pointer;"
+                onclick="showToast('✅ Push notifications updated')">Enabled</button>
+            </div>
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0;">
+              <div style="font-weight:600; font-size:14px;">Email Digests</div>
+              <button class="btn-primary"
+                style="padding:6px 12px; font-size:12px; background:var(--bg-input); color:var(--text-1); border:1px solid var(--border); border-radius:6px; cursor:pointer;"
+                onclick="showToast('✅ Email digests updated')">Weekly</button>
+            </div>
+          </div>
+
+          <div style="margin-top:24px; display:flex; justify-content:flex-end;">
+            <button class="btn-primary"
+              style="padding:10px 20px; font-size:14px; font-weight:700; background:var(--accent); color:#fff; border:none; border-radius:6px; cursor:pointer; transition:transform 0.15s ease;"
+              onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'"
+              onmouseleave="this.style.transform='scale(1)'" onclick="showToast('💾 Settings saved successfully!')">Save
+              Changes</button>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+
+    <!-- RIGHT SIDEBAR -->
+    <aside class="right-sidebar" id="right-sidebar">
+      <div class="right-sidebar-section">
+        <div class="rs-label">Trending Now</div>
+        <ul class="trending-list">
+          <li class="trending-item">#WebDev <span class="trend-count">1.2K posts</span></li>
+          <li class="trending-item">#UIDesign <span class="trend-count">876 posts</span></li>
+          <li class="trending-item">#ProductivityHacks <span class="trend-count">541 posts</span></li>
+          <li class="trending-item">#TechLife <span class="trend-count">432 posts</span></li>
+          <li class="trending-item">#DevLife <span class="trend-count">318 posts</span></li>
+        </ul>
+      </div>
+
+      <div class="right-sidebar-section">
+        <div class="rs-label">People You May Know</div>
+        <ul class="suggestions-list">
+          <li class="suggestion-item">
+            <div class="sug-avatar" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">A</div>
+            <div class="sug-info"><span class="sug-name">Alex M.</span><span class="sug-mutual">3 mutual friends</span>
+            </div>
+            <button class="follow-btn">Follow</button>
+          </li>
+          <li class="suggestion-item">
+            <div class="sug-avatar" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6)">J</div>
+            <div class="sug-info"><span class="sug-name">Jamie L.</span><span class="sug-mutual">1 mutual friend</span>
+            </div>
+            <button class="follow-btn">Follow</button>
+          </li>
+          <li class="suggestion-item">
+            <div class="sug-avatar" style="background:linear-gradient(135deg,#10b981,#3b82f6)">K</div>
+            <div class="sug-info"><span class="sug-name">Kim W.</span><span class="sug-mutual">5 mutual friends</span>
+            </div>
+            <button class="follow-btn">Follow</button>
+          </li>
+        </ul>
+      </div>
+
+      <div class="right-sidebar-section">
+        <div class="rs-label">Online Friends</div>
+        <ul class="online-friends-list">
+          <li class="online-friend" data-user="sarah">
+            <div class="of-avatar" style="background:linear-gradient(135deg,#a855f7,#6366f1)">S<div
+                class="status-dot online"></div>
+            </div>
+            <span>Sarah K.</span>
+          </li>
+          <li class="online-friend" data-user="maya">
+            <div class="of-avatar" style="background:linear-gradient(135deg,#f97316,#eab308)">M<div
+                class="status-dot online"></div>
+            </div>
+            <span>Maya T.</span>
+          </li>
+          <li class="online-friend" data-user="leo">
+            <div class="of-avatar" style="background:linear-gradient(135deg,#10b981,#06b6d4)">Le<div
+                class="status-dot online"></div>
+            </div>
+            <span>Leo B.</span>
+          </li>
+        </ul>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- ===== CREATE POST MODAL ===== -->
+  <div class="modal-overlay" id="create-post-overlay" style="display:none">
+    <div class="modal create-post-modal" id="create-post-modal">
+      <div class="modal-header">
+        <h3 id="modal-post-type-title">Create Post</h3>
+        <button class="icon-btn" id="close-create-post">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Post Type Tabs -->
+      <div class="post-type-tabs">
+        <button class="ptype-tab active" data-type="text" id="ptype-text">✍️ Text</button>
+
+        <button class="ptype-tab" data-type="photo" id="ptype-photo">🖼️ Photo</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="post-author-row">
+          <div class="cp-avatar" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)">Y</div>
+          <div>
+            <div class="post-author-name">You</div>
+            <div class="post-visibility">🌍 Public</div>
+          </div>
+        </div>
+
+        <!-- Text post fields -->
+        <div class="post-fields" id="post-fields-text">
+          <div class="post-textarea" id="post-text-input" contenteditable="true"
+            data-placeholder="What's on your mind?"></div>
+        </div>
+
+
+        <!-- Photo post fields -->
+        <div class="post-fields hidden" id="post-fields-photo">
+          <div class="post-textarea" id="photo-caption-input" contenteditable="true"
+            data-placeholder="Write a caption…"></div>
+          <div class="photo-drop-area" id="photo-drop-area">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </svg>
+            <span>Click or drag to upload photos</span>
+            <input type="file" id="photo-file-input" accept="image/*" style="display:none" multiple />
+          </div>
+          <div class="photo-preview-grid" id="photo-preview-grid" style="display:none"></div>
+        </div>
+
+        <div class="post-submit-row">
+          <div class="post-emoji-row">
+            <button class="toolbar-btn" id="post-emoji-btn">😊</button>
+            <button class="toolbar-btn" id="post-attach-btn">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
+          </div>
+          <button class="btn-primary post-submit-btn" id="submit-post-btn">Share with Everyone</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== NOTIFICATIONS PANEL ===== -->
+  <div class="notif-panel" id="notif-panel" style="display:none">
+    <div class="notif-panel-header">
+      <h3>Notifications</h3>
+      <button class="mark-all-btn" id="mark-all-btn">Mark all read</button>
+    </div>
+    <ul class="notif-list" id="notif-list">
+      <li class="notif-item unread">
+        <div class="notif-avatar" style="background:linear-gradient(135deg,#a855f7,#6366f1)">S</div>
+        <div class="notif-body"><span class="notif-who">Sarah K.</span> liked your post <span class="notif-time">2m
+            ago</span></div>
+      </li>
+      <li class="notif-item unread">
+        <div class="notif-avatar" style="background:linear-gradient(135deg,#f97316,#eab308)">M</div>
+        <div class="notif-body"><span class="notif-who">Maya T.</span> commented: "Amazing post! 🔥" <span
+            class="notif-time">15m ago</span></div>
+      </li>
+      <li class="notif-item unread">
+        <div class="notif-avatar" style="background:linear-gradient(135deg,#10b981,#06b6d4)">Le</div>
+        <div class="notif-body"><span class="notif-who">Leo B.</span> shared your post <span class="notif-time">1h
+            ago</span></div>
+      </li>
+      <li class="notif-item">
+        <div class="notif-avatar" style="background:linear-gradient(135deg,#3b82f6,#06b6d4)">L</div>
+        <div class="notif-body"><span class="notif-who">Liam R.</span> started following you <span class="notif-time">3h
+            ago</span></div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- ===== TOAST ===== -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Hidden inputs -->
+  <input type="file" id="chat-file-input" style="display:none" accept="image/*,application/pdf,.doc,.docx" />
+
+  <script src="app.js"></script>
+</body>
+
+</html>
