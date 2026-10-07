@@ -186,9 +186,19 @@ function savePosts(posts) {
   } catch (e) {}
 }
 
+function userKey(base) {
+  return base + '_' + (state.currentUser ? state.currentUser.id : 'guest');
+}
+
+function reloadUserScopedData() {
+  state.dmMessages = state.currentUser ? loadDMs() : {};
+  state.dmSettings = state.currentUser ? loadDMSettings() : {};
+  state.activeDM = null;
+}
+
 function loadDMs() {
   try {
-    const saved = localStorage.getItem(STORAGE.DMS);
+    const saved = localStorage.getItem(userKey(STORAGE.DMS));
     if (saved) {
       const dms = JSON.parse(saved);
       const clean = {};
@@ -205,13 +215,13 @@ function loadDMs() {
 
 function saveDMs(dms) {
   try {
-    localStorage.setItem(STORAGE.DMS, JSON.stringify(dms));
+    if (state.currentUser) localStorage.setItem(userKey(STORAGE.DMS), JSON.stringify(dms));
   } catch (e) {}
 }
 
 function loadDMSettings() {
   try {
-    const saved = localStorage.getItem(STORAGE.DM_SETTINGS);
+    const saved = localStorage.getItem(userKey(STORAGE.DM_SETTINGS));
     if (saved) return JSON.parse(saved);
   } catch (e) {}
   return {};
@@ -219,7 +229,7 @@ function loadDMSettings() {
 
 function saveDMSettings() {
   try {
-    localStorage.setItem(STORAGE.DM_SETTINGS, JSON.stringify(state.dmSettings));
+    if (state.currentUser) localStorage.setItem(userKey(STORAGE.DM_SETTINGS), JSON.stringify(state.dmSettings));
   } catch (e) {}
 }
 
@@ -289,6 +299,7 @@ function loginUser(user) {
   state.currentUser = user;
   USERS[user.id] = user;
   localStorage.setItem(STORAGE.SESSION, user.id);
+  reloadUserScopedData();
 
   const authScreen = document.getElementById('auth-screen');
   if (authScreen) {
@@ -312,15 +323,8 @@ function loginUser(user) {
   renderOnlineMembers();
   renderFriendsList();
 
-  // Open chat with first available user if any exist
-  const others = Object.keys(USERS).filter(u => u !== user.id);
-  if (others.length) {
-    state.activeDM = others[0];
-    renderDMChat(others[0]);
-  } else {
-    state.activeDM = null;
-    if (chatMessages) chatMessages.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:40px 20px;">No other members yet. Share your profile link to invite friends! 🚀</p>';
-  }
+  renderDMChat(null);
+  if (db) listenToCloudMessages();
 
   updateProfileStats();
   showToast(`👋 Welcome back, ${user.name}!`);
@@ -537,7 +541,12 @@ function handleForgotPassword() {
 
 function logout() {
   localStorage.removeItem(STORAGE.SESSION);
+  stopMessageListeners();
   state.currentUser = null;
+  state.dmMessages = {};
+  state.dmSettings = {};
+  state.activeDM = null;
+  renderDMUserList();
 
   switchView('feed');
 
@@ -1007,54 +1016,64 @@ function listenToCloudPosts() {
   }
 }
 
+let _msgUnsubs = [];
+
+function stopMessageListeners() {
+  _msgUnsubs.forEach(u => { try { u(); } catch (e) {} });
+  _msgUnsubs = [];
+}
+
+function handleCloudMessageDocs(docs, silent) {
+  const currentId = state.currentUser ? state.currentUser.id : null;
+  if (!currentId) return;
+  let hasUpdateForActive = false;
+  let changed = false;
+
+  docs.forEach(doc => {
+    const msg = doc.data();
+    if (!msg || !msg.from || !msg.to) return;
+    let peer;
+    if (msg.from === currentId) peer = msg.to;
+    else if (msg.to === currentId) peer = msg.from;
+    else return; // never touch messages that are not mine
+
+    if (!state.dmMessages[peer]) state.dmMessages[peer] = [];
+    const list = state.dmMessages[peer];
+    const dup = list.some(m => m.id === doc.id || (m.timestamp && m.timestamp === msg.timestamp && m.from === msg.from));
+    if (dup) return;
+
+    list.push({ ...msg, id: doc.id });
+    changed = true;
+    const incoming = msg.to === currentId;
+
+    if (incoming && state.dmSettings[peer] && state.dmSettings[peer].deleted) {
+      state.dmSettings[peer].deleted = false;
+      saveDMSettings();
+    }
+    if (peer === state.activeDM) hasUpdateForActive = true;
+    else if (incoming && !silent) showToast(`💬 New message from ${USERS[peer]?.name || 'a member'}`);
+  });
+
+  if (!changed) return;
+  Object.values(state.dmMessages).forEach(a => a.sort((x, y) => (x.timestamp || 0) - (y.timestamp || 0)));
+  saveDMs(state.dmMessages);
+  renderDMUserList();
+  if (hasUpdateForActive && state.view === 'messages') renderDMChat(state.activeDM);
+}
+
 function listenToCloudMessages() {
-  if (!db) return;
-  try {
-    db.collection('messages').orderBy('timestamp', 'asc').limitToLast(100).onSnapshot(snapshot => {
-      if (snapshot.empty) return;
-      let hasUpdateForActive = false;
-
-      snapshot.forEach(doc => {
-        const msg = doc.data();
-        if (!msg || !msg.from || !msg.to) return;
-        const currentId = state.currentUser ? state.currentUser.id : 'you';
-
-        if (msg.from === currentId) {
-          const peer = msg.to;
-          if (!state.dmMessages[peer]) state.dmMessages[peer] = [];
-          if (!state.dmMessages[peer].some(m => m.id === doc.id || (m.timestamp && m.timestamp === msg.timestamp))) {
-            state.dmMessages[peer].push({ ...msg, id: doc.id });
-            if (peer === state.activeDM) hasUpdateForActive = true;
-          }
-        } else if (msg.to === currentId) {
-          const peer = msg.from;
-          if (state.dmSettings[peer] && state.dmSettings[peer].deleted) {
-            state.dmSettings[peer].deleted = false;
-            saveDMSettings();
-          }
-          if (!state.dmMessages[peer]) state.dmMessages[peer] = [];
-          if (!state.dmMessages[peer].some(m => m.id === doc.id || (m.timestamp && m.timestamp === msg.timestamp))) {
-            state.dmMessages[peer].push({ ...msg, id: doc.id });
-            if (peer === state.activeDM) {
-              hasUpdateForActive = true;
-            } else {
-              showToast(`💬 New message from ${USERS[peer]?.name || 'a member'}`);
-            }
-          }
-        }
-      });
-
-      saveDMs(state.dmMessages);
-      renderDMUserList();
-      if (hasUpdateForActive && state.view === 'messages') {
-        renderDMChat(state.activeDM);
-      }
-    }, err => {
-      console.warn('Firestore messages subscription warning:', err);
-    });
-  } catch (e) {
-    console.warn(e);
-  }
+  stopMessageListeners();
+  if (!db || !state.currentUser) return;
+  const me = state.currentUser.id;
+  // Two simple queries: messages I sent + messages sent to me. Nothing else is downloaded.
+  ['from', 'to'].forEach(field => {
+    let first = true;
+    const unsub = db.collection('messages').where(field, '==', me).onSnapshot(snap => {
+      handleCloudMessageDocs(snap.docs, first);
+      first = false;
+    }, err => console.warn('Firestore messages subscription warning:', err));
+    _msgUnsubs.push(unsub);
+  });
 }
 
 // ─── DYNAMIC USER & MEMBERS LIST ──────────────────────────────
@@ -1071,19 +1090,25 @@ function renderDMUserList(query = '') {
     if (!u) return false;
     // Hide deleted conversations unless there's a search query
     if (!q && state.dmSettings[uid] && state.dmSettings[uid].deleted) return false;
-    if (!q) return true;
+    if (!q) return (state.dmMessages[uid] || []).length > 0 || uid === state.activeDM;
     return (
       (u.name && u.name.toLowerCase().includes(q)) ||
       (u.handle && u.handle.toLowerCase().includes(q))
     );
   });
 
+  const lastTs = uid => {
+    const m = state.dmMessages[uid] || [];
+    return m.length ? (m[m.length - 1].timestamp || 0) : 0;
+  };
+  filteredIds.sort((a, b) => lastTs(b) - lastTs(a));
+
   dmList.innerHTML = '';
 
   if (filteredIds.length === 0) {
     dmList.innerHTML = `
       <li style="padding:24px 16px;text-align:center;color:var(--text-3);font-size:13px;">
-        ${q ? 'No members matching "' + esc(q) + '"' : 'No conversations yet. Start chatting! ✨'}
+        ${q ? 'No members matching "' + esc(q) + '"' : 'No conversations yet. Search a name above to start chatting ✨'}
       </li>
     `;
     return;
@@ -1129,9 +1154,10 @@ function renderDMUserList(query = '') {
     li.addEventListener('click', (e) => {
       // Don't open chat when clicking the three-dot menu
       if (e.target.closest('.dm-more-btn')) return;
-      state.dmSettings[uid] = { ...(state.dmSettings[uid] || {}), unread: false };
+      state.dmSettings[uid] = { ...(state.dmSettings[uid] || {}), unread: false, deleted: false };
       saveDMSettings();
       renderDMChat(uid);
+      renderDMUserList(document.getElementById('msg-search') ? document.getElementById('msg-search').value : '');
     });
 
     dmList.appendChild(li);
@@ -1285,13 +1311,7 @@ function deleteConversation(userId) {
   state.dmSettings[userId] = { ...(state.dmSettings[userId] || {}), deleted: true };
   saveDMSettings();
   // Switch chat away if this was active
-  if (state.activeDM === userId) {
-    const others = Object.keys(USERS).filter(u => u !== (state.currentUser?.id || 'you') && !(state.dmSettings[u] && state.dmSettings[u].deleted));
-    if (others.length) renderDMChat(others[0]);
-    else {
-      if (chatMessages) chatMessages.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:40px 20px;">No conversations yet. Select a member to start chatting! 💬</p>';
-    }
-  }
+  if (state.activeDM === userId) renderDMChat(null);
   renderDMUserList();
   showToast('🗑️ Conversation deleted');
 }
@@ -1407,6 +1427,7 @@ function renderFriendsList() {
 // ─── RENDER DM CHAT ───────────────────────────────────────────
 function renderDMChat(userId) {
   const chatMsgContainer = document.getElementById('chat-messages');
+  document.body.classList.toggle('chat-open', !!(userId && USERS[userId]));
   if (!userId || !USERS[userId]) {
     state.activeDM = null;
     if (chatMsgContainer) {
@@ -1521,6 +1542,7 @@ function sendChatMessage() {
   const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const timestamp = Date.now();
   const targetUser = state.activeDM;
+  if (!targetUser || !USERS[targetUser]) { showToast('⚠️ Select a conversation first'); return; }
 
   const msg = { from: currentId, to: targetUser, text, time, timestamp, read: false };
 
@@ -1757,14 +1779,8 @@ function switchView(viewId) {
     if (msgBadge) msgBadge.style.display = 'none';
     const lnavBadge = document.querySelector('.lnav-badge');
     if (lnavBadge) lnavBadge.textContent = '';
-    if (state.activeDM && USERS[state.activeDM]) {
-      renderDMChat(state.activeDM);
-    } else {
-      const currentId = state.currentUser ? state.currentUser.id : null;
-      const others = Object.keys(USERS).filter(u => u !== currentId);
-      if (others.length) renderDMChat(others[0]);
-      else if (chatMessages) chatMessages.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:40px 20px;">No members yet — invite friends to start chatting! 🚀</p>';
-    }
+    if (state.activeDM && USERS[state.activeDM]) renderDMChat(state.activeDM);
+    else renderDMChat(null);
   } else {
     document.body.classList.remove('messages-active');
   }
@@ -1955,12 +1971,9 @@ function attachEventListeners() {
   const newMsgBtn = document.getElementById('new-msg-btn');
   if (newMsgBtn) {
     newMsgBtn.addEventListener('click', () => {
-      const availableUsers = Object.keys(USERS).filter(u => u !== (state.currentUser?.id || 'you'));
-      const nextUser = availableUsers.find(u => u !== state.activeDM) || availableUsers[0];
-      if (nextUser) {
-        renderDMChat(nextUser);
-        showToast(`💬 Switched chat to ${USERS[nextUser].name}`);
-      }
+      const box = document.getElementById('msg-search');
+      if (box) box.focus();
+      showToast('🔎 Search a name to start a new chat');
     });
   }
 
@@ -2008,9 +2021,7 @@ function init() {
 
   // Init & Boot state
   state.posts = loadPosts();
-  state.dmMessages = loadDMs();
   state.savedPosts = loadSavedPosts();
-  state.dmSettings = loadDMSettings();
   state.following = loadFollowing();
 
   // Attach event handlers
@@ -2018,6 +2029,7 @@ function init() {
 
   // Check user authentication session
   checkAuthSession();
+  reloadUserScopedData();
 
   // Render initial views & dynamic member lists
   renderFeed();
@@ -2027,13 +2039,7 @@ function init() {
   renderFriendsList();
 
   // Select first available real conversation if any exist, otherwise clear chat panel
-  const currentId = state.currentUser ? state.currentUser.id : null;
-  const others = Object.keys(USERS).filter(u => u !== currentId && !DUMMY_IDS.has(u.toLowerCase()) && !isDummyUser(USERS[u], u));
-  if (others.length) {
-    renderDMChat(others[0]);
-  } else {
-    renderDMChat(null);
-  }
+  renderDMChat(null);
 
   // Connect to Firebase Cloud Database for multi-device sync
   initFirebase();
