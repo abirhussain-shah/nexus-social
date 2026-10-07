@@ -46,7 +46,8 @@ const STORAGE = {
   POSTS: 'nexus_posts_db',
   DMS: 'nexus_dms_db',
   SAVED: 'nexus_saved_db',
-  THEME: 'nexus-theme'
+  THEME: 'nexus-theme',
+  DM_SETTINGS: 'nexus_dm_settings'
 };
 
 // ─── Default Users ────────────────────────────────────────────
@@ -125,7 +126,8 @@ const state = {
   activeDM: 'sarah',
   myPostCount: 0,
   savedPosts: [],
-  searchQuery: ''
+  searchQuery: '',
+  dmSettings: {} // { [userId]: { muted: bool, deleted: bool, unread: bool } }
 };
 
 // ─── Seed Posts ────────────────────────────────────────────────
@@ -228,6 +230,20 @@ function loadDMs() {
 function saveDMs(dms) {
   try {
     localStorage.setItem(STORAGE.DMS, JSON.stringify(dms));
+  } catch (e) {}
+}
+
+function loadDMSettings() {
+  try {
+    const saved = localStorage.getItem(STORAGE.DM_SETTINGS);
+    if (saved) return JSON.parse(saved);
+  } catch (e) {}
+  return {};
+}
+
+function saveDMSettings() {
+  try {
+    localStorage.setItem(STORAGE.DM_SETTINGS, JSON.stringify(state.dmSettings));
   } catch (e) {}
 }
 
@@ -873,6 +889,8 @@ function renderDMUserList(query = '') {
   const filteredIds = allUserIds.filter(uid => {
     const u = USERS[uid];
     if (!u) return false;
+    // Hide deleted conversations unless there's a search query
+    if (!q && state.dmSettings[uid] && state.dmSettings[uid].deleted) return false;
     if (!q) return true;
     return (
       (u.name && u.name.toLowerCase().includes(q)) ||
@@ -885,7 +903,7 @@ function renderDMUserList(query = '') {
   if (filteredIds.length === 0) {
     dmList.innerHTML = `
       <li style="padding:24px 16px;text-align:center;color:var(--text-3);font-size:13px;">
-        ${q ? 'No members matching "' + esc(q) + '"' : 'No other members registered yet.'}
+        ${q ? 'No members matching "' + esc(q) + '"' : 'No conversations yet. Start chatting! ✨'}
       </li>
     `;
     return;
@@ -898,9 +916,12 @@ function renderDMUserList(query = '') {
     const previewText = lastMsg ? lastMsg.text : 'Click to start chatting ✨';
     const previewTime = lastMsg ? (lastMsg.time || '') : '';
     const isActive = state.activeDM === uid;
+    const settings = state.dmSettings[uid] || {};
+    const isMuted = !!settings.muted;
+    const isUnread = !!settings.unread;
 
     const li = document.createElement('li');
-    li.className = `dm-item ${isActive ? 'active' : ''}`;
+    li.className = `dm-item ${isActive ? 'active' : ''} ${isMuted ? 'dm-muted' : ''}`;
     li.dataset.user = uid;
     li.innerHTML = `
       <div class="dm-avatar" style="background:${u.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)'}">
@@ -908,20 +929,191 @@ function renderDMUserList(query = '') {
         <div class="status-dot online"></div>
       </div>
       <div class="dm-info">
-        <span class="dm-name">${esc(u.name)} <span style="font-size:11px;font-weight:400;color:var(--text-3);">${esc(u.handle || '')}</span></span>
-        <span class="dm-preview">${esc(previewText)}</span>
+        <span class="dm-name" style="${isUnread ? 'font-weight:800;' : ''}">${esc(u.name)}
+          <span style="font-size:11px;font-weight:400;color:var(--text-3);">${esc(u.handle || '')}</span>
+          ${isMuted ? '<span class="dm-muted-badge">🔇 Muted</span>' : ''}
+        </span>
+        <span class="dm-preview" style="${isUnread ? 'color:var(--text-1);font-weight:600;' : ''}">${esc(previewText)}</span>
       </div>
       <div class="dm-meta">
-        <span class="dm-time">${previewTime}</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="dm-time">${previewTime}</span>
+          <button class="dm-more-btn" data-user="${uid}" title="More options" onclick="openDMMenu(event, '${uid}')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+          </button>
+        </div>
+        ${isUnread ? '<span class="dm-unread">●</span>' : ''}
       </div>
     `;
 
-    li.addEventListener('click', () => {
+    li.addEventListener('click', (e) => {
+      // Don't open chat when clicking the three-dot menu
+      if (e.target.closest('.dm-more-btn')) return;
+      state.dmSettings[uid] = { ...(state.dmSettings[uid] || {}), unread: false };
+      saveDMSettings();
       renderDMChat(uid);
     });
 
     dmList.appendChild(li);
   });
+}
+
+// ─── INBOX CONTEXT MENU ───────────────────────────────────────
+let _dmMenuOpenFor = null;
+
+function openDMMenu(event, userId) {
+  event.stopPropagation();
+  event.preventDefault();
+
+  // Close any existing menu
+  closeAllDMMenus();
+
+  const settings = state.dmSettings[userId] || {};
+  const isMuted = !!settings.muted;
+
+  const menu = document.createElement('div');
+  menu.className = 'dm-context-menu';
+  menu.id = 'dm-context-menu';
+  menu.innerHTML = `
+    <button class="dm-menu-item" onclick="toggleMuteConversation('${userId}')">
+      ${isMuted
+        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg> Unmute'
+        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg> Mute'}
+    </button>
+    <button class="dm-menu-item" onclick="markConversationUnread('${userId}')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      Mark as Unread
+    </button>
+    <button class="dm-menu-item" onclick="archiveConversation('${userId}')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+      Archive Chat
+    </button>
+    <div class="dm-menu-divider"></div>
+    <button class="dm-menu-item danger" onclick="confirmDeleteConversation('${userId}')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+      Delete Conversation
+    </button>
+  `;
+
+  // Position the menu near the button
+  const btn = event.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  document.body.appendChild(menu);
+
+  // Smart positioning
+  const menuW = 200;
+  const menuH = menu.offsetHeight || 220;
+  let left = rect.right - menuW;
+  let top = rect.bottom + 4;
+  if (left < 8) left = 8;
+  if (top + menuH > window.innerHeight - 8) top = rect.top - menuH - 4;
+
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+
+  _dmMenuOpenFor = userId;
+
+  // Close on outside click
+  setTimeout(() => {
+    document.addEventListener('click', closeAllDMMenus, { once: true });
+  }, 0);
+}
+
+function closeAllDMMenus() {
+  const existing = document.getElementById('dm-context-menu');
+  if (existing) existing.remove();
+  _dmMenuOpenFor = null;
+}
+
+// ─── INBOX ACTIONS ────────────────────────────────────────────
+function toggleMuteConversation(userId) {
+  closeAllDMMenus();
+  const settings = state.dmSettings[userId] || {};
+  settings.muted = !settings.muted;
+  state.dmSettings[userId] = settings;
+  saveDMSettings();
+  renderDMUserList();
+  showToast(settings.muted ? '🔇 Conversation muted' : '🔔 Conversation unmuted');
+}
+
+function markConversationUnread(userId) {
+  closeAllDMMenus();
+  const settings = state.dmSettings[userId] || {};
+  settings.unread = true;
+  state.dmSettings[userId] = settings;
+  saveDMSettings();
+  renderDMUserList();
+  showToast('✉️ Marked as unread');
+}
+
+function archiveConversation(userId) {
+  closeAllDMMenus();
+  // Toggle archive: remove from list (same as soft-delete but recoverable via search)
+  const settings = state.dmSettings[userId] || {};
+  settings.deleted = !settings.deleted;
+  state.dmSettings[userId] = settings;
+  saveDMSettings();
+  if (state.activeDM === userId && settings.deleted) {
+    // Switch to another user
+    const others = Object.keys(USERS).filter(u => u !== (state.currentUser?.id || 'you') && !(state.dmSettings[u] && state.dmSettings[u].deleted));
+    if (others.length) renderDMChat(others[0]);
+  }
+  renderDMUserList();
+  showToast(settings.deleted ? '📁 Chat archived' : '📂 Chat unarchived');
+}
+
+function confirmDeleteConversation(userId) {
+  closeAllDMMenus();
+  const u = USERS[userId];
+  const name = u ? u.name : 'this user';
+
+  // Create confirmation modal
+  const overlay = document.createElement('div');
+  overlay.className = 'delete-confirm-overlay';
+  overlay.id = 'delete-confirm-overlay';
+  overlay.innerHTML = `
+    <div class="delete-confirm-modal">
+      <div class="delete-confirm-icon">🗑️</div>
+      <div class="delete-confirm-title">Delete Conversation</div>
+      <div class="delete-confirm-body">
+        Are you sure you want to delete your conversation with <strong>${esc(name)}</strong>?
+        This will permanently remove all messages from your inbox.
+      </div>
+      <div class="delete-confirm-actions">
+        <button class="delete-confirm-btn cancel" onclick="closeDMConfirm()">Cancel</button>
+        <button class="delete-confirm-btn confirm" onclick="deleteConversation('${userId}')">Delete</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) closeDMConfirm();
+  });
+}
+
+function closeDMConfirm() {
+  const overlay = document.getElementById('delete-confirm-overlay');
+  if (overlay) overlay.remove();
+}
+
+function deleteConversation(userId) {
+  closeDMConfirm();
+  // Delete local messages
+  delete state.dmMessages[userId];
+  saveDMs(state.dmMessages);
+  // Mark as deleted so it's hidden from DM list
+  state.dmSettings[userId] = { ...(state.dmSettings[userId] || {}), deleted: true };
+  saveDMSettings();
+  // Switch chat away if this was active
+  if (state.activeDM === userId) {
+    const others = Object.keys(USERS).filter(u => u !== (state.currentUser?.id || 'you') && !(state.dmSettings[u] && state.dmSettings[u].deleted));
+    if (others.length) renderDMChat(others[0]);
+    else {
+      if (chatMessages) chatMessages.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:40px 20px;">No conversations yet. Select a member to start chatting! 💬</p>';
+    }
+  }
+  renderDMUserList();
+  showToast('🗑️ Conversation deleted');
 }
 
 function renderOnlineMembers() {
@@ -1412,6 +1604,8 @@ function attachEventListeners() {
     if (e.key === 'Escape') {
       createPostOverlay.style.display = 'none';
       notifPanel.style.display = 'none';
+      closeDMConfirm();
+      closeAllDMMenus();
     }
   });
 
@@ -1509,6 +1703,7 @@ function init() {
   state.posts = loadPosts();
   state.dmMessages = loadDMs();
   state.savedPosts = loadSavedPosts();
+  state.dmSettings = loadDMSettings();
 
   // Attach event handlers
   attachEventListeners();
@@ -1541,6 +1736,14 @@ window.logout = logout;
 window.renderDMChat = renderDMChat;
 window.renderDMUserList = renderDMUserList;
 window.showToast = showToast;
+window.openDMMenu = openDMMenu;
+window.closeAllDMMenus = closeAllDMMenus;
+window.toggleMuteConversation = toggleMuteConversation;
+window.markConversationUnread = markConversationUnread;
+window.archiveConversation = archiveConversation;
+window.confirmDeleteConversation = confirmDeleteConversation;
+window.closeDMConfirm = closeDMConfirm;
+window.deleteConversation = deleteConversation;
 
 // ─── Boot ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);

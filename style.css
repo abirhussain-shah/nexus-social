@@ -2277,3 +2277,192 @@ body.light-theme .auth-error { background: rgba(239,68,68,0.07); color: #dc2626;
     max-width: 100% !important;
   }
 }
+
+/* ── DM Three-dot Button ────────────────────────────────────── */
+.dm-more-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-3);
+  padding: 0;
+  transition: background var(--ease), color var(--ease);
+  flex-shrink: 0;
+}
+
+.dm-item:hover .dm-more-btn,
+.dm-item.active .dm-more-btn {
+  display: flex;
+}
+
+.dm-more-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+/* ── DM Muted Badge ─────────────────────────────────────────── */
+.dm-muted-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-3);
+  background: var(--bg-hover);
+  padding: 1px 6px;
+  border-radius: 99px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.dm-item.dm-muted .dm-preview {
+  opacity: 0.55;
+}
+
+/* ── DM Context Menu ────────────────────────────────────────── */
+.dm-context-menu {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 6px;
+  min-width: 200px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.2);
+  backdrop-filter: blur(20px);
+  animation: menuPop 0.15s cubic-bezier(0.34,1.56,0.64,1);
+}
+
+@keyframes menuPop {
+  from { opacity: 0; transform: scale(0.9) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.dm-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 9px;
+  text-align: left;
+  transition: background var(--ease), color var(--ease);
+}
+
+.dm-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.dm-menu-item.danger {
+  color: #f87171;
+}
+
+.dm-menu-item.danger:hover {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.dm-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+/* ── Delete Confirmation Modal ──────────────────────────────── */
+.delete-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+
+.delete-confirm-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 32px 28px;
+  max-width: 380px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+  animation: modalSlideUp 0.2s cubic-bezier(0.34,1.56,0.64,1);
+}
+
+@keyframes modalSlideUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.delete-confirm-icon {
+  font-size: 40px;
+  margin-bottom: 14px;
+  filter: grayscale(0.2);
+}
+
+.delete-confirm-title {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text-1);
+  margin-bottom: 10px;
+}
+
+.delete-confirm-body {
+  font-size: 13.5px;
+  color: var(--text-2);
+  line-height: 1.55;
+  margin-bottom: 24px;
+}
+
+.delete-confirm-body strong {
+  color: var(--text-1);
+}
+
+.delete-confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.delete-confirm-btn {
+  flex: 1;
+  padding: 10px 20px;
+  border-radius: 99px;
+  border: none;
+  font-size: 13.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--ease);
+}
+
+.delete-confirm-btn.cancel {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.delete-confirm-btn.cancel:hover {
+  background: var(--border);
+}
+
+.delete-confirm-btn.confirm {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #fff;
+}
+
+.delete-confirm-btn.confirm:hover {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
+}
