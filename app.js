@@ -50,72 +50,11 @@ const STORAGE = {
   DM_SETTINGS: 'nexus_dm_settings'
 };
 
-// ─── Default Users ────────────────────────────────────────────
-const DEFAULT_USERS = {
-  you: {
-    id: 'you',
-    name: 'Alex Rivera',
-    email: 'alex@nexus.dev',
-    handle: '@alex',
-    password: 'password123',
-    initials: 'A',
-    gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)',
-    bio: 'Software Engineer | Building products for the future ✨'
-  },
-  sarah: {
-    id: 'sarah',
-    name: 'Sarah K.',
-    email: 'sarah@nexus.dev',
-    handle: '@sarahk',
-    password: 'password123',
-    initials: 'S',
-    gradient: 'linear-gradient(135deg,#a855f7,#6366f1)',
-    bio: 'Product Designer & UI enthusiast 🎨'
-  },
-  maya: {
-    id: 'maya',
-    name: 'Maya T.',
-    email: 'maya@nexus.dev',
-    handle: '@mayat',
-    password: 'password123',
-    initials: 'M',
-    gradient: 'linear-gradient(135deg,#f97316,#eab308)',
-    bio: 'Frontend wizard & Open source lover 💻'
-  },
-  leo: {
-    id: 'leo',
-    name: 'Leo B.',
-    email: 'leo@nexus.dev',
-    handle: '@leob',
-    password: 'password123',
-    initials: 'Le',
-    gradient: 'linear-gradient(135deg,#10b981,#06b6d4)',
-    bio: 'Tech storyteller & creator 🎬'
-  },
-  liam: {
-    id: 'liam',
-    name: 'Liam R.',
-    email: 'liam@nexus.dev',
-    handle: '@liamr',
-    password: 'password123',
-    initials: 'L',
-    gradient: 'linear-gradient(135deg,#3b82f6,#06b6d4)',
-    bio: 'Systems Architect & Cloud engineer ☁️'
-  },
-  zoe: {
-    id: 'zoe',
-    name: 'Zoe P.',
-    email: 'zoe@nexus.dev',
-    handle: '@zoep',
-    password: 'password123',
-    initials: 'Z',
-    gradient: 'linear-gradient(135deg,#ec4899,#f43f5e)',
-    bio: 'Visual artist & digital creator 🌸'
-  }
-};
+// Default Users — empty, only real registered users are loaded
+const DEFAULT_USERS = {};
 
 // In-memory active USERS registry
-const USERS = { ...DEFAULT_USERS };
+const USERS = {};
 
 // ─── State ────────────────────────────────────────────────────
 const state = {
@@ -123,76 +62,25 @@ const state = {
   view: 'feed',
   posts: [],
   dmMessages: {},
-  activeDM: 'sarah',
+  activeDM: null,
   myPostCount: 0,
   savedPosts: [],
   searchQuery: '',
   dmSettings: {} // { [userId]: { muted: bool, deleted: bool, unread: bool } }
 };
 
-// ─── Seed Posts ────────────────────────────────────────────────
-const SEED_POSTS = [
-  {
-    id: 'p1', type: 'text', user: 'sarah',
-    time: '2 minutes ago',
-    text: `Just wrapped up the new onboarding flow and I'm honestly so proud of how it turned out 🎉 The animations are silky smooth and the user testing feedback has been incredible!\n\nBig shoutout to the whole team for the support ❤️`,
-    likes: 42, likedByMe: false, shares: 8,
-    comments: [
-      { user: 'maya',  text: 'This is amazing! The animations are so smooth 😍', time: '1m ago' },
-      { user: 'leo',   text: 'Huge congrats Sarah! 🔥', time: 'Just now' },
-    ],
-    showComments: true,
-  },
-  {
-    id: 'p4', type: 'text', user: 'liam',
-    time: '3 hours ago',
-    text: `Hot take: The best code review comment is a question, not a correction.\n\nInstead of "this is wrong, do it this way" → "Have you considered X? It might handle the edge case when Y happens"\n\nQuestions teach. Corrections sting. 🤝`,
-    likes: 89, likedByMe: false, shares: 31,
-    comments: [],
-    showComments: false,
-  },
-];
-
-// ─── Seed DMs ─────────────────────────────────────────────────
-const SEED_DMS = {
-  sarah: [
-    { from: 'sarah', text: 'Hey! Can we chat about the Q4 roadmap?', time: '10:00 AM' },
-    { from: 'you',   text: 'Of course! Give me 5 mins to finish up.', time: '10:02 AM' },
-    { from: 'sarah', text: 'No worries, take your time 😊', time: '10:03 AM' },
-    { from: 'sarah', text: 'Also — loved your post from this morning!', time: '10:05 AM' },
-    { from: 'you',   text: 'Thanks! It got way more engagement than I expected 🎉', time: '10:06 AM' },
-  ],
-  maya: [
-    { from: 'maya', text: 'Love the new design system colors!', time: 'Yesterday' },
-    { from: 'you',  text: 'Thank you! Spent a whole weekend on the tokens 😅', time: 'Yesterday' },
-    { from: 'maya', text: 'It totally shows. Really premium feel 🙌', time: 'Yesterday' },
-  ],
-  liam: [
-    { from: 'you',  text: 'Hey Liam, can you review my PR when you get a chance?', time: '9:20 AM' },
-    { from: 'liam', text: 'Sure! In a meeting until 11, will check after.', time: '9:45 AM' },
-  ],
-  leo: [
-    { from: 'leo', text: 'Love the vlog idea — should we collab?', time: 'Yesterday' },
-    { from: 'you', text: 'Yes! Let\'s set up a call this week 🎬', time: 'Yesterday' },
-    { from: 'leo', text: 'Perfect! I\'ll DM you some ideas', time: 'Yesterday' },
-  ],
-  zoe: [
-    { from: 'zoe', text: 'Hey! Have you seen the new design trends?', time: '2d ago' },
-    { from: 'you', text: 'Yes! The glassmorphism stuff is 🔥', time: '2d ago' },
-    { from: 'zoe', text: 'Great idea! We should do a concept together', time: '2d ago' },
-  ],
-};
+// ─── Seed Posts & DMs ─────────────────────────────────────────
+// No seed data — only real user content is shown
+const SEED_POSTS = [];
+const SEED_DMS = {};
 
 // ─── Storage Helpers ──────────────────────────────────────────
 function getStoredUsers() {
   try {
     const data = localStorage.getItem(STORAGE.USERS);
-    if (data) {
-      const parsed = JSON.parse(data);
-      return { ...DEFAULT_USERS, ...parsed };
-    }
+    if (data) return JSON.parse(data);
   } catch (e) {}
-  return { ...DEFAULT_USERS };
+  return {};
 }
 
 function saveStoredUsers(users) {
@@ -206,7 +94,7 @@ function loadPosts() {
     const saved = localStorage.getItem(STORAGE.POSTS);
     if (saved) return JSON.parse(saved);
   } catch (e) {}
-  return SEED_POSTS.map(p => ({ ...p, comments: p.comments.map(c => ({ ...c })) }));
+  return [];
 }
 
 function savePosts(posts) {
@@ -220,11 +108,7 @@ function loadDMs() {
     const saved = localStorage.getItem(STORAGE.DMS);
     if (saved) return JSON.parse(saved);
   } catch (e) {}
-  const dms = {};
-  for (const [u, msgs] of Object.entries(SEED_DMS)) {
-    dms[u] = msgs.map(m => ({ ...m }));
-  }
-  return dms;
+  return {};
 }
 
 function saveDMs(dms) {
@@ -276,7 +160,7 @@ const savedPostsFeed = document.getElementById('saved-posts-feed');
 // ─── Authentication Core ──────────────────────────────────────
 function checkAuthSession() {
   const storedUsers = getStoredUsers();
-  // Hydrate USERS registry
+  // Hydrate USERS registry with only real registered users
   Object.assign(USERS, storedUsers);
 
   const currentUserId = localStorage.getItem(STORAGE.SESSION);
@@ -318,16 +202,42 @@ function loginUser(user) {
 
   syncUserUI();
   renderFeed();
-  renderDMChat(state.activeDM || 'sarah');
+  renderDMUserList();
+  renderOnlineMembers();
+  renderFriendsList();
+
+  // Open chat with first available user if any exist
+  const others = Object.keys(USERS).filter(u => u !== user.id);
+  if (others.length) {
+    state.activeDM = others[0];
+    renderDMChat(others[0]);
+  } else {
+    state.activeDM = null;
+    if (chatMessages) chatMessages.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:40px 20px;">No other members yet. Share your profile link to invite friends! 🚀</p>';
+  }
+
   updateProfileStats();
   showToast(`👋 Welcome back, ${user.name}!`);
 }
 
 function demoLogin() {
   const users = getStoredUsers();
-  const demoUser = users['you'] || DEFAULT_USERS['you'];
+  let demoUser = users['demo_user'] || users['you'];
+  if (!demoUser) {
+    demoUser = {
+      id: 'demo_user',
+      name: 'Demo User',
+      handle: '@demouser',
+      bio: 'Exploring Nexus Social ✨',
+      initials: 'DU',
+      gradient: 'linear-gradient(135deg, #6366f1, #a855f7)',
+      email: 'demo@nexus.app'
+    };
+    users['demo_user'] = demoUser;
+    saveStoredUsers(users);
+  }
   loginUser(demoUser);
-  showToast('🚀 Signed in as Demo User (Alex Rivera)');
+  showToast('🚀 Signed in as Demo User');
 }
 
 function handleLogin() {
@@ -614,48 +524,29 @@ function syncUserUI() {
   if (settingsUsername) settingsUsername.value = user.handle || '@you';
 }
 
-// ─── Init ─────────────────────────────────────────────────────
-function init() {
-  // Ensure default storage
-  const stored = getStoredUsers();
-  saveStoredUsers(stored);
-
-  state.posts = loadPosts();
-  state.dmMessages = loadDMs();
-  state.savedPosts = loadSavedPosts();
-
-  checkAuthSession();
-
-  renderFeed();
-  renderDMChat('sarah');
-  updateProfileStats();
-  attachEventListeners();
-
-  // Init Theme
-  const themeToggle = document.getElementById('theme-toggle');
-  if (themeToggle) {
-    if (localStorage.getItem(STORAGE.THEME) === 'light') {
-      themeToggle.checked = true;
-      document.body.classList.add('light-theme');
-    }
-  }
+// ─── RENDER FEED ──────────────────────────────────────────────
+// Helper: comment avatar using real current user
+function getCommentAvatar() {
+  const cu = state.currentUser || { gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', initials: 'U' };
+  return `<div class="cp-avatar" style="background:${cu.gradient};width:30px;height:30px;font-size:11px;">${cu.initials}</div>`;
 }
 
-// ─── RENDER FEED ──────────────────────────────────────────────
 function renderFeed() {
   postsFeed.innerHTML = '';
-  
+
   let visiblePosts = state.posts;
   if (state.searchQuery) {
     const q = state.searchQuery.toLowerCase();
-    visiblePosts = visiblePosts.filter(p => 
-      p.text.toLowerCase().includes(q) || 
+    visiblePosts = visiblePosts.filter(p =>
+      p.text.toLowerCase().includes(q) ||
       (USERS[p.user] && USERS[p.user].name.toLowerCase().includes(q))
     );
   }
-  
+
   if (visiblePosts.length === 0) {
-    postsFeed.innerHTML = `<p style="color:var(--text-3);text-align:center;padding:32px;">No posts found for "${esc(state.searchQuery)}" 🧐</p>`;
+    postsFeed.innerHTML = state.searchQuery
+      ? `<p style="color:var(--text-3);text-align:center;padding:32px;">No posts found for "${esc(state.searchQuery)}" 🧐</p>`
+      : `<p style="color:var(--text-3);text-align:center;padding:40px 20px;">No posts yet — be the first to share something! ✨</p>`;
     return;
   }
 
@@ -721,7 +612,7 @@ function createPostCard(post) {
       <div class="comments-section">
         <div class="comment-list">${commentItems}</div>
         <div class="add-comment-row" style="margin-top:10px;">
-          <div class="cp-avatar" style="background:${USERS.you.gradient};width:30px;height:30px;font-size:11px;">Y</div>
+          ${getCommentAvatar(post)}
           <div class="comment-input" id="ci-${post.id}" contenteditable="true" data-placeholder="Write a comment…"></div>
           <button class="comment-send-btn" onclick="addComment('${post.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -789,7 +680,7 @@ function listenToCloudUsers() {
       snapshot.forEach(doc => {
         const u = doc.data();
         if (u && u.id) {
-          USERS[u.id] = { ...DEFAULT_USERS[u.id], ...u };
+          USERS[u.id] = u;
           changed = true;
         }
       });
@@ -797,6 +688,7 @@ function listenToCloudUsers() {
         saveStoredUsers(USERS);
         renderDMUserList();
         renderOnlineMembers();
+        renderFriendsList();
       }
     }, err => {
       console.warn('Firestore users subscription warning:', err);
@@ -1120,10 +1012,14 @@ function renderOnlineMembers() {
   const onlineList = document.getElementById('online-friends-list');
   if (!onlineList) return;
 
-  const currentId = state.currentUser ? state.currentUser.id : 'you';
+  const currentId = state.currentUser ? state.currentUser.id : null;
   const members = Object.keys(USERS).filter(uid => uid !== currentId);
 
   onlineList.innerHTML = '';
+  if (members.length === 0) {
+    onlineList.innerHTML = '<li style="color:var(--text-3);font-size:12.5px;padding:8px 0;">No members yet</li>';
+    return;
+  }
   members.slice(0, 8).forEach(uid => {
     const u = USERS[uid];
     const li = document.createElement('li');
@@ -1145,18 +1041,112 @@ function renderOnlineMembers() {
   });
 }
 
+function renderFriendsList() {
+  const friendsList = document.getElementById('friends-list');
+  const suggestionsList = document.getElementById('suggestions-list');
+
+  const currentId = state.currentUser ? state.currentUser.id : null;
+  const members = Object.keys(USERS).filter(uid => uid !== currentId);
+
+  if (friendsList) {
+    friendsList.innerHTML = '';
+    if (members.length === 0) {
+      friendsList.innerHTML = '<li style="color:var(--text-3);font-size:12.5px;padding:8px 12px;">No members yet</li>';
+    } else {
+      members.forEach(uid => {
+        const u = USERS[uid];
+        if (!u) return;
+        const li = document.createElement('li');
+        li.className = 'friend-item';
+        li.dataset.user = uid;
+        li.innerHTML = `
+          <div class="friend-avatar" style="background:${u.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)'}">
+            ${u.initials || u.name?.slice(0, 2).toUpperCase() || 'U'}
+            <div class="status-dot online"></div>
+          </div>
+          <div class="friend-info">
+            <span class="fname">${esc(u.name)}</span>
+            <span class="fstatus">Member</span>
+          </div>
+          <button class="msg-friend-btn" data-user="${uid}" title="Message">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+        `;
+        const btn = li.querySelector('.msg-friend-btn');
+        if (btn) {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            switchView('messages');
+            renderDMChat(uid);
+          });
+        }
+        li.addEventListener('click', () => {
+          switchView('messages');
+          renderDMChat(uid);
+        });
+        friendsList.appendChild(li);
+      });
+    }
+  }
+
+  if (suggestionsList) {
+    suggestionsList.innerHTML = '';
+    if (members.length === 0) {
+      suggestionsList.innerHTML = '<li style="color:var(--text-3);font-size:12.5px;padding:8px 0;">No suggestions yet</li>';
+    } else {
+      members.slice(0, 4).forEach(uid => {
+        const u = USERS[uid];
+        if (!u) return;
+        const li = document.createElement('li');
+        li.className = 'suggestion-item';
+        li.innerHTML = `
+          <div class="sug-avatar" style="background:${u.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)'}">
+            ${u.initials || u.name?.slice(0, 2).toUpperCase() || 'U'}
+          </div>
+          <div class="sug-info">
+            <span class="sug-name">${esc(u.name)}</span>
+            <span class="sug-mutual">${esc(u.handle || 'Member')}</span>
+          </div>
+          <button class="follow-btn" onclick="showToast('Followed ${esc(u.name)} ✨')">Follow</button>
+        `;
+        suggestionsList.appendChild(li);
+      });
+    }
+  }
+}
+
 // ─── RENDER DM CHAT ───────────────────────────────────────────
 function renderDMChat(userId) {
+  const chatMsgContainer = document.getElementById('chat-messages');
+  if (!userId || !USERS[userId]) {
+    state.activeDM = null;
+    if (chatMsgContainer) {
+      chatMsgContainer.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:40px 20px;">Select a conversation to start messaging 💬</p>';
+    }
+    const avatarEl = document.getElementById('chat-peer-avatar');
+    if (avatarEl) { avatarEl.textContent = ''; avatarEl.style.display = 'none'; }
+    const nameEl = document.getElementById('chat-peer-name');
+    if (nameEl) nameEl.textContent = 'Select a conversation';
+    const statusEl = document.getElementById('chat-peer-status');
+    if (statusEl) statusEl.textContent = '';
+    const inputEl = document.getElementById('chat-input');
+    if (inputEl) inputEl.dataset.placeholder = 'Select a user to message…';
+    return;
+  }
+
   state.activeDM = userId;
   if (!state.dmMessages[userId]) state.dmMessages[userId] = [];
   const msgs = state.dmMessages[userId];
-  chatMessages.innerHTML = '';
+  if (chatMsgContainer) chatMsgContainer.innerHTML = '';
 
-  chatMessages.appendChild(createDateDivider('Today'));
-
-  msgs.forEach(msg => {
-    chatMessages.appendChild(createChatBubble(msg));
-  });
+  if (chatMsgContainer) {
+    chatMsgContainer.appendChild(createDateDivider('Today'));
+    msgs.forEach(msg => {
+      chatMsgContainer.appendChild(createChatBubble(msg));
+    });
+  }
 
   scrollChatToBottom();
 
@@ -1165,11 +1155,14 @@ function renderDMChat(userId) {
   if (user) {
     const avatarEl = document.getElementById('chat-peer-avatar');
     if (avatarEl) {
+      avatarEl.style.display = '';
       avatarEl.style.background = user.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)';
       avatarEl.textContent = user.initials || user.name?.slice(0, 2).toUpperCase() || 'U';
     }
     const nameEl = document.getElementById('chat-peer-name');
     if (nameEl) nameEl.textContent = user.name;
+    const statusEl = document.getElementById('chat-peer-status');
+    if (statusEl) statusEl.textContent = 'Active now';
     const inputEl = document.getElementById('chat-input');
     if (inputEl) inputEl.dataset.placeholder = `Message ${user.name}…`;
   }
@@ -1192,9 +1185,10 @@ function createDateDivider(label) {
 }
 
 function createChatBubble(msg) {
-  const currentId = state.currentUser ? state.currentUser.id : 'you';
-  const isOwn = msg.from === currentId || msg.from === 'you';
-  const user = isOwn ? (USERS[currentId] || USERS.you) : (USERS[msg.from] || USERS.you);
+  const currentId = state.currentUser ? state.currentUser.id : null;
+  const isOwn = msg.from === currentId || (!currentId && msg.from === 'you');
+  const currentUser = state.currentUser || { gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', initials: 'U' };
+  const user = isOwn ? (USERS[currentId] || currentUser) : (USERS[msg.from] || { gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', initials: '?' });
   const row = document.createElement('div');
   row.className = `chat-msg-row${isOwn ? ' own' : ''}`;
 
@@ -1445,14 +1439,21 @@ function switchView(viewId) {
   // Highlight matching nav items
   document.querySelectorAll(`[data-view="${viewId}"]`).forEach(el => el.classList.add('active'));
 
-  // Update message badge & toggle full-screen messages layout (NO FREE SPACE)
+  // switchView for messages — use first real user
   if (viewId === 'messages') {
     document.body.classList.add('messages-active');
     const msgBadge = document.getElementById('msg-nav-badge');
     if (msgBadge) msgBadge.style.display = 'none';
     const lnavBadge = document.querySelector('.lnav-badge');
     if (lnavBadge) lnavBadge.textContent = '';
-    renderDMChat(state.activeDM || 'sarah');
+    if (state.activeDM && USERS[state.activeDM]) {
+      renderDMChat(state.activeDM);
+    } else {
+      const currentId = state.currentUser ? state.currentUser.id : null;
+      const others = Object.keys(USERS).filter(u => u !== currentId);
+      if (others.length) renderDMChat(others[0]);
+      else if (chatMessages) chatMessages.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:40px 20px;">No members yet — invite friends to start chatting! 🚀</p>';
+    }
   } else {
     document.body.classList.remove('messages-active');
   }
@@ -1699,7 +1700,7 @@ function init() {
     if (themeToggle) themeToggle.checked = true;
   }
 
-  // Load local state
+  // Init & Boot
   state.posts = loadPosts();
   state.dmMessages = loadDMs();
   state.savedPosts = loadSavedPosts();
@@ -1711,9 +1712,21 @@ function init() {
   // Check user authentication session
   checkAuthSession();
 
-  // Render initial dynamic member lists
+  // Render initial views & dynamic member lists
+  renderFeed();
+  updateProfileStats();
   renderDMUserList();
   renderOnlineMembers();
+  renderFriendsList();
+
+  // Select first available conversation if any exist, otherwise clear chat panel
+  const currentId = state.currentUser ? state.currentUser.id : null;
+  const others = Object.keys(USERS).filter(u => u !== currentId);
+  if (others.length) {
+    renderDMChat(others[0]);
+  } else {
+    renderDMChat(null);
+  }
 
   // Connect to Firebase Cloud Database for multi-device sync
   initFirebase();
@@ -1744,6 +1757,7 @@ window.archiveConversation = archiveConversation;
 window.confirmDeleteConversation = confirmDeleteConversation;
 window.closeDMConfirm = closeDMConfirm;
 window.deleteConversation = deleteConversation;
+window.renderFriendsList = renderFriendsList;
 
 // ─── Boot ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);
