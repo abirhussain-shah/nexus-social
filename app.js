@@ -47,8 +47,78 @@ const STORAGE = {
   DMS: 'nexus_dms_db',
   SAVED: 'nexus_saved_db',
   THEME: 'nexus-theme',
-  DM_SETTINGS: 'nexus_dm_settings'
+  DM_SETTINGS: 'nexus_dm_settings',
+  FOLLOWING: 'nexus_following_db'
 };
+
+// Dummy users blacklist — permanently prevented from showing
+const DUMMY_IDS = new Set(['sarah', 'maya', 'leo', 'liam', 'zoe', 'alex', 'you', 'demo_user']);
+const DUMMY_HANDLES = new Set(['@sarahk', '@mayat', '@leob', '@liamr', '@zoep', '@alex', '@you']);
+const DUMMY_NAMES = new Set(['Sarah K.', 'Maya T.', 'Leo B.', 'Liam R.', 'Zoe P.', 'Alex Rivera']);
+
+function isDummyUser(u, id) {
+  if (id && DUMMY_IDS.has(id.toLowerCase())) return true;
+  if (u) {
+    if (u.id && DUMMY_IDS.has(u.id.toLowerCase())) return true;
+    if (u.handle && DUMMY_HANDLES.has(u.handle.toLowerCase())) return true;
+    if (u.name && DUMMY_NAMES.has(u.name)) return true;
+  }
+  return false;
+}
+
+function purgeLegacyDummyData() {
+  ['nexus_users', 'nexus_posts', 'nexus_dms', 'nexus_messages'].forEach(k => {
+    try { localStorage.removeItem(k); } catch (e) {}
+  });
+
+  try {
+    const rawUsers = localStorage.getItem(STORAGE.USERS);
+    if (rawUsers) {
+      const parsed = JSON.parse(rawUsers);
+      let changed = false;
+      for (const k of Object.keys(parsed)) {
+        if (isDummyUser(parsed[k], k)) {
+          delete parsed[k];
+          changed = true;
+        }
+      }
+      if (changed) localStorage.setItem(STORAGE.USERS, JSON.stringify(parsed));
+    }
+  } catch (e) {}
+
+  try {
+    const rawDms = localStorage.getItem(STORAGE.DMS);
+    if (rawDms) {
+      const parsed = JSON.parse(rawDms);
+      let changed = false;
+      for (const k of Object.keys(parsed)) {
+        if (DUMMY_IDS.has(k.toLowerCase()) || isDummyUser(null, k)) {
+          delete parsed[k];
+          changed = true;
+        }
+      }
+      if (changed) localStorage.setItem(STORAGE.DMS, JSON.stringify(parsed));
+    }
+  } catch (e) {}
+
+  try {
+    const rawPosts = localStorage.getItem(STORAGE.POSTS);
+    if (rawPosts) {
+      const parsed = JSON.parse(rawPosts);
+      const filtered = parsed.filter(p => !DUMMY_IDS.has(p.user) && !DUMMY_NAMES.has(p.author));
+      if (filtered.length !== parsed.length) {
+        localStorage.setItem(STORAGE.POSTS, JSON.stringify(filtered));
+      }
+    }
+  } catch (e) {}
+
+  for (const k of Object.keys(USERS)) {
+    if (isDummyUser(USERS[k], k)) delete USERS[k];
+  }
+  for (const k of Object.keys(state.dmMessages)) {
+    if (DUMMY_IDS.has(k.toLowerCase())) delete state.dmMessages[k];
+  }
+}
 
 // Default Users — empty, only real registered users are loaded
 const DEFAULT_USERS = {};
@@ -66,7 +136,10 @@ const state = {
   myPostCount: 0,
   savedPosts: [],
   searchQuery: '',
-  dmSettings: {} // { [userId]: { muted: bool, deleted: bool, unread: bool } }
+  dmSettings: {}, // { [userId]: { muted: bool, deleted: bool, unread: bool } }
+  following: [], // [userId, ...]
+  feedTab: 'all', // 'all' | 'following'
+  viewingProfileUserId: null // null = own profile, otherwise userId
 };
 
 // ─── Seed Posts & DMs ─────────────────────────────────────────
@@ -78,7 +151,14 @@ const SEED_DMS = {};
 function getStoredUsers() {
   try {
     const data = localStorage.getItem(STORAGE.USERS);
-    if (data) return JSON.parse(data);
+    if (data) {
+      const users = JSON.parse(data);
+      const clean = {};
+      for (const k of Object.keys(users)) {
+        if (!isDummyUser(users[k], k)) clean[k] = users[k];
+      }
+      return clean;
+    }
   } catch (e) {}
   return {};
 }
@@ -92,7 +172,10 @@ function saveStoredUsers(users) {
 function loadPosts() {
   try {
     const saved = localStorage.getItem(STORAGE.POSTS);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const posts = JSON.parse(saved);
+      return posts.filter(p => !DUMMY_IDS.has(p.user) && !DUMMY_NAMES.has(p.author));
+    }
   } catch (e) {}
   return [];
 }
@@ -106,7 +189,16 @@ function savePosts(posts) {
 function loadDMs() {
   try {
     const saved = localStorage.getItem(STORAGE.DMS);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const dms = JSON.parse(saved);
+      const clean = {};
+      for (const k of Object.keys(dms)) {
+        if (!DUMMY_IDS.has(k.toLowerCase()) && !isDummyUser(null, k)) {
+          clean[k] = dms[k];
+        }
+      }
+      return clean;
+    }
   } catch (e) {}
   return {};
 }
@@ -137,6 +229,20 @@ function loadSavedPosts() {
     if (saved) return JSON.parse(saved);
   } catch (e) {}
   return [];
+}
+
+function loadFollowing() {
+  try {
+    const saved = localStorage.getItem(STORAGE.FOLLOWING);
+    if (saved) return JSON.parse(saved);
+  } catch (e) {}
+  return [];
+}
+
+function saveFollowing(following) {
+  try {
+    localStorage.setItem(STORAGE.FOLLOWING, JSON.stringify(following));
+  } catch (e) {}
 }
 
 function saveSavedPosts(savedIds) {
@@ -524,17 +630,40 @@ function syncUserUI() {
   if (settingsUsername) settingsUsername.value = user.handle || '@you';
 }
 
-// ─── RENDER FEED ──────────────────────────────────────────────
-// Helper: comment avatar using real current user
+// ─── RENDER FEED & TWITTER-STYLE TABS ─────────────────────────
+function setFeedTab(tab) {
+  state.feedTab = tab;
+  const allBtn = document.getElementById('feed-tab-all');
+  const followingBtn = document.getElementById('feed-tab-following');
+  if (allBtn && followingBtn) {
+    if (tab === 'following') {
+      followingBtn.classList.add('active');
+      allBtn.classList.remove('active');
+    } else {
+      allBtn.classList.add('active');
+      followingBtn.classList.remove('active');
+    }
+  }
+  renderFeed();
+}
+
 function getCommentAvatar() {
   const cu = state.currentUser || { gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', initials: 'U' };
   return `<div class="cp-avatar" style="background:${cu.gradient};width:30px;height:30px;font-size:11px;">${cu.initials}</div>`;
 }
 
 function renderFeed() {
+  if (!postsFeed) return;
   postsFeed.innerHTML = '';
 
-  let visiblePosts = state.posts;
+  let visiblePosts = state.posts.filter(p => !DUMMY_IDS.has(p.user) && !DUMMY_NAMES.has(p.author));
+
+  // Filter by Twitter-style tab
+  if (state.feedTab === 'following') {
+    const currentId = state.currentUser ? state.currentUser.id : null;
+    visiblePosts = visiblePosts.filter(p => state.following.includes(p.user) || p.user === currentId);
+  }
+
   if (state.searchQuery) {
     const q = state.searchQuery.toLowerCase();
     visiblePosts = visiblePosts.filter(p =>
@@ -544,9 +673,19 @@ function renderFeed() {
   }
 
   if (visiblePosts.length === 0) {
-    postsFeed.innerHTML = state.searchQuery
-      ? `<p style="color:var(--text-3);text-align:center;padding:32px;">No posts found for "${esc(state.searchQuery)}" 🧐</p>`
-      : `<p style="color:var(--text-3);text-align:center;padding:40px 20px;">No posts yet — be the first to share something! ✨</p>`;
+    if (state.searchQuery) {
+      postsFeed.innerHTML = `<p style="color:var(--text-3);text-align:center;padding:32px;">No posts found for "${esc(state.searchQuery)}" 🧐</p>`;
+    } else if (state.feedTab === 'following') {
+      postsFeed.innerHTML = `
+        <div style="text-align:center;padding:48px 20px;color:var(--text-3);">
+          <div style="font-size:36px;margin-bottom:12px;">👥</div>
+          <h3 style="font-size:16px;font-weight:700;color:var(--text-1);margin-bottom:6px;">No posts from people you follow yet</h3>
+          <p style="font-size:13px;max-width:360px;margin:0 auto 16px;">Follow other registered members to see their posts here, just like Twitter!</p>
+          <button class="btn-primary" style="padding:8px 20px;font-size:13px;border-radius:99px;" onclick="setFeedTab('all')">Browse "For You" Feed</button>
+        </div>`;
+    } else {
+      postsFeed.innerHTML = `<p style="color:var(--text-3);text-align:center;padding:40px 20px;">No posts yet — be the first to share something! ✨</p>`;
+    }
     return;
   }
 
@@ -556,7 +695,7 @@ function renderFeed() {
 }
 
 function createPostCard(post) {
-  const user = USERS[post.user];
+  const user = USERS[post.user] || { name: post.author || 'Member', gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', initials: 'U' };
   const card = document.createElement('div');
   card.className = 'post-card';
   card.id = 'post-' + post.id;
@@ -596,12 +735,12 @@ function createPostCard(post) {
   let commentsHtml = '';
   if (post.showComments) {
     const commentItems = post.comments.map(c => {
-      const cu = USERS[c.user] || USERS.you;
+      const cu = USERS[c.user] || { name: 'Member', gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', initials: 'M' };
       return `
         <div class="comment-item">
-          <div class="comment-avatar" style="background:${cu.gradient}">${cu.initials}</div>
+          <div class="comment-avatar" style="background:${cu.gradient}" onclick="viewUserProfile('${c.user}')">${cu.initials}</div>
           <div class="comment-bubble">
-            <div class="comment-author">${cu.name}</div>
+            <div class="comment-author" onclick="viewUserProfile('${c.user}')">${esc(cu.name)}</div>
             <div class="comment-text">${esc(c.text)}</div>
             <div class="comment-time">${c.time}</div>
           </div>
@@ -612,7 +751,7 @@ function createPostCard(post) {
       <div class="comments-section">
         <div class="comment-list">${commentItems}</div>
         <div class="add-comment-row" style="margin-top:10px;">
-          ${getCommentAvatar(post)}
+          ${getCommentAvatar()}
           <div class="comment-input" id="ci-${post.id}" contenteditable="true" data-placeholder="Write a comment…"></div>
           <button class="comment-send-btn" onclick="addComment('${post.id}')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -621,13 +760,20 @@ function createPostCard(post) {
       </div>`;
   }
 
+  const isPostAuthorOwn = (post.user === state.currentUser?.id);
+  const userFollowing = isFollowing(post.user);
+  const followBtnHtml = (!isPostAuthorOwn && post.user) ? `
+    <button class="follow-btn-sm ${userFollowing ? 'following' : ''}" data-user="${post.user}" onclick="event.stopPropagation(); toggleFollowUser('${post.user}', this);">
+      ${userFollowing ? 'Following ✓' : 'Follow'}
+    </button>` : '';
+
   card.innerHTML = `
     <div class="post-card-header">
-      <div class="post-user-avatar" style="background:${user.gradient}" title="${user.name}">${user.initials}</div>
+      <div class="post-user-avatar" style="background:${user.gradient}" title="${esc(user.name)}" onclick="viewUserProfile('${post.user}')">${user.initials}</div>
       <div class="post-user-info">
         <div class="post-user-name" style="display:flex;align-items:center;gap:8px;">
-          ${user.name}
-          ${post.user !== 'you' ? `<button class="follow-btn-sm" onclick="toggleFollow(this)">Follow</button>` : ''}
+          <span onclick="viewUserProfile('${post.user}')">${esc(user.name)}</span>
+          ${followBtnHtml}
         </div>
         <div class="post-meta"><span>🌍 Public</span><span class="post-meta-dot">·</span><span>${post.time}</span></div>
       </div>
@@ -656,19 +802,144 @@ function createPostCard(post) {
   return card;
 }
 
-// ─── RENDER PROFILE ───────────────────────────────────────────
-function updateProfileStats() {
-  const currentId = state.currentUser ? state.currentUser.id : 'you';
-  const myPosts = state.posts.filter(p => p.user === currentId || (currentId === 'you' && p.user === 'you'));
-  state.myPostCount = myPosts.length;
-  if (statPosts) statPosts.textContent = state.myPostCount;
+// ─── RENDER PROFILE & VIEW USER PROFILE ─────────────────────────
+function isFollowing(userId) {
+  if (!userId) return false;
+  return state.following.includes(userId);
+}
 
-  profilePosts.innerHTML = '';
-  if (myPosts.length === 0) {
-    profilePosts.innerHTML = `<p style="color:var(--text-3);text-align:center;padding:32px;">You haven't posted anything yet. Create your first post! 🚀</p>`;
-    return;
+function toggleFollowUser(userId, btnEl) {
+  if (!userId) return;
+  const user = USERS[userId];
+  const userName = user ? user.name : 'this user';
+
+  const index = state.following.indexOf(userId);
+  let nowFollowing = false;
+
+  if (index > -1) {
+    state.following.splice(index, 1);
+    nowFollowing = false;
+    showToast(`Unfollowed ${userName}`);
+  } else {
+    state.following.push(userId);
+    nowFollowing = true;
+    showToast(`✨ You are now following ${userName}! Their posts will appear in your "Following" feed.`);
   }
-  myPosts.forEach(p => profilePosts.appendChild(createPostCard(p)));
+
+  saveFollowing(state.following);
+
+  // Sync button element
+  if (btnEl) {
+    if (btnEl.classList.contains('profile-follow-btn')) {
+      btnEl.className = `profile-follow-btn ${nowFollowing ? 'following' : ''}`;
+      btnEl.textContent = nowFollowing ? 'Following ✓' : 'Follow';
+    } else if (btnEl.classList.contains('follow-btn-sm')) {
+      btnEl.className = `follow-btn-sm ${nowFollowing ? 'following' : ''}`;
+      btnEl.textContent = nowFollowing ? 'Following ✓' : 'Follow';
+    } else {
+      btnEl.textContent = nowFollowing ? 'Following ✓' : 'Follow';
+    }
+  }
+
+  document.querySelectorAll(`.follow-btn-sm[data-user="${userId}"]`).forEach(b => {
+    b.className = `follow-btn-sm ${nowFollowing ? 'following' : ''}`;
+    b.textContent = nowFollowing ? 'Following ✓' : 'Follow';
+  });
+
+  // Update stats if currently on profile
+  if (state.viewingProfileUserId === userId) {
+    const statFollowersEl = document.getElementById('stat-followers');
+    if (statFollowersEl) statFollowersEl.textContent = nowFollowing ? '1' : '0';
+  } else if (!state.viewingProfileUserId || state.viewingProfileUserId === state.currentUser?.id) {
+    const statFollowingEl = document.getElementById('stat-following');
+    if (statFollowingEl) statFollowingEl.textContent = state.following.length;
+  }
+
+  if (state.feedTab === 'following') {
+    renderFeed();
+  }
+}
+
+function startChatWithUser(userId) {
+  if (!userId) return;
+  switchView('messages');
+  renderDMChat(userId);
+}
+
+function viewUserProfile(userId) {
+  const currentId = state.currentUser ? state.currentUser.id : null;
+  const targetId = userId || currentId;
+  state.viewingProfileUserId = targetId;
+
+  const isOwn = (!targetId || targetId === currentId);
+  const user = (targetId && USERS[targetId]) ? USERS[targetId] : (state.currentUser || { name: 'You', handle: '@you', bio: 'Exploring Nexus Social ✨', gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', initials: 'Y' });
+
+  // Update profile header
+  const heroAvatar = document.getElementById('profile-hero-avatar') || document.querySelector('.profile-hero-avatar');
+  if (heroAvatar) {
+    heroAvatar.style.background = user.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)';
+    heroAvatar.textContent = user.initials || user.name?.slice(0, 2).toUpperCase() || 'U';
+  }
+
+  const heroName = document.getElementById('profile-hero-name') || document.querySelector('.profile-hero-name');
+  if (heroName) heroName.textContent = user.name;
+
+  const heroHandle = document.getElementById('profile-hero-handle');
+  if (heroHandle) heroHandle.textContent = user.handle || `@${user.name.toLowerCase().replace(/\s+/g, '')}`;
+
+  const heroBio = document.getElementById('profile-hero-bio') || document.querySelector('.profile-hero-bio');
+  if (heroBio) heroBio.textContent = user.bio || (isOwn ? 'Software Engineer | Building products for the future ✨' : 'Member of Nexus Social ✨');
+
+  // Stats
+  const userPosts = state.posts.filter(p => p.user === targetId && !DUMMY_IDS.has(p.user));
+  const statPostsEl = document.getElementById('stat-posts');
+  if (statPostsEl) statPostsEl.textContent = userPosts.length;
+
+  const statFollowingEl = document.getElementById('stat-following');
+  if (statFollowingEl) {
+    statFollowingEl.textContent = isOwn ? state.following.length : (user.followingCount || '0');
+  }
+
+  const statFollowersEl = document.getElementById('stat-followers');
+  if (statFollowersEl) {
+    statFollowersEl.textContent = isOwn ? (user.followersCount || '0') : (isFollowing(targetId) ? '1' : '0');
+  }
+
+  // Action buttons
+  const actionsBar = document.getElementById('profile-actions-bar');
+  if (actionsBar) {
+    if (isOwn) {
+      actionsBar.innerHTML = `<button class="btn-primary" id="edit-profile-btn" onclick="openEditProfileModal()">Edit Profile</button>`;
+    } else {
+      const following = isFollowing(targetId);
+      actionsBar.innerHTML = `
+        <button class="profile-follow-btn ${following ? 'following' : ''}" id="profile-follow-btn" onclick="toggleFollowUser('${targetId}', this)">
+          ${following ? 'Following ✓' : 'Follow'}
+        </button>
+        <button class="profile-msg-btn" id="profile-msg-btn" onclick="startChatWithUser('${targetId}')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Message
+        </button>
+      `;
+    }
+  }
+
+  // Render User Posts
+  const profilePostsEl = document.getElementById('profile-posts');
+  if (profilePostsEl) {
+    profilePostsEl.innerHTML = '';
+    if (userPosts.length === 0) {
+      profilePostsEl.innerHTML = `<p style="color:var(--text-3);text-align:center;padding:40px 20px;">${isOwn ? "You haven't posted anything yet. Share your first post! 🚀" : `${esc(user.name)} hasn't posted anything yet.`}</p>`;
+    } else {
+      userPosts.forEach(p => profilePostsEl.appendChild(createPostCard(p)));
+    }
+  }
+
+  switchView('profile');
+}
+
+function updateProfileStats() {
+  viewUserProfile(state.viewingProfileUserId || state.currentUser?.id);
 }
 
 // ─── CLOUD SYNC & REAL-TIME LISTENERS ─────────────────────────
@@ -774,8 +1045,8 @@ function renderDMUserList(query = '') {
   const dmList = document.getElementById('dm-list');
   if (!dmList) return;
 
-  const currentId = state.currentUser ? state.currentUser.id : 'you';
-  const allUserIds = Object.keys(USERS).filter(uid => uid !== currentId);
+  const currentId = state.currentUser ? state.currentUser.id : null;
+  const allUserIds = Object.keys(USERS).filter(uid => uid !== currentId && !DUMMY_IDS.has(uid.toLowerCase()) && !isDummyUser(USERS[uid], uid));
 
   const q = (query || '').toLowerCase().trim();
   const filteredIds = allUserIds.filter(uid => {
@@ -1013,15 +1284,16 @@ function renderOnlineMembers() {
   if (!onlineList) return;
 
   const currentId = state.currentUser ? state.currentUser.id : null;
-  const members = Object.keys(USERS).filter(uid => uid !== currentId);
+  const members = Object.keys(USERS).filter(uid => uid !== currentId && !DUMMY_IDS.has(uid.toLowerCase()) && !isDummyUser(USERS[uid], uid));
 
   onlineList.innerHTML = '';
   if (members.length === 0) {
-    onlineList.innerHTML = '<li style="color:var(--text-3);font-size:12.5px;padding:8px 0;">No members yet</li>';
+    onlineList.innerHTML = '<li style="color:var(--text-3);font-size:12.5px;padding:8px 0;">No other members online</li>';
     return;
   }
   members.slice(0, 8).forEach(uid => {
     const u = USERS[uid];
+    if (!u) return;
     const li = document.createElement('li');
     li.className = 'online-friend';
     li.dataset.user = uid;
@@ -1034,8 +1306,7 @@ function renderOnlineMembers() {
       <span>${esc(u.name)}</span>
     `;
     li.addEventListener('click', () => {
-      switchView('messages');
-      renderDMChat(uid);
+      viewUserProfile(uid);
     });
     onlineList.appendChild(li);
   });
@@ -1046,7 +1317,7 @@ function renderFriendsList() {
   const suggestionsList = document.getElementById('suggestions-list');
 
   const currentId = state.currentUser ? state.currentUser.id : null;
-  const members = Object.keys(USERS).filter(uid => uid !== currentId);
+  const members = Object.keys(USERS).filter(uid => uid !== currentId && !DUMMY_IDS.has(uid.toLowerCase()) && !isDummyUser(USERS[uid], uid));
 
   if (friendsList) {
     friendsList.innerHTML = '';
@@ -1066,10 +1337,10 @@ function renderFriendsList() {
           </div>
           <div class="friend-info">
             <span class="fname">${esc(u.name)}</span>
-            <span class="fstatus">Member</span>
+            <span class="fstatus">${esc(u.handle || 'Member')}</span>
           </div>
           <button class="msg-friend-btn" data-user="${uid}" title="Message">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="14" height="14" viewBox="0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
           </button>
@@ -1078,13 +1349,11 @@ function renderFriendsList() {
         if (btn) {
           btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            switchView('messages');
-            renderDMChat(uid);
+            startChatWithUser(uid);
           });
         }
         li.addEventListener('click', () => {
-          switchView('messages');
-          renderDMChat(uid);
+          viewUserProfile(uid);
         });
         friendsList.appendChild(li);
       });
@@ -1099,17 +1368,18 @@ function renderFriendsList() {
       members.slice(0, 4).forEach(uid => {
         const u = USERS[uid];
         if (!u) return;
+        const following = isFollowing(uid);
         const li = document.createElement('li');
         li.className = 'suggestion-item';
         li.innerHTML = `
-          <div class="sug-avatar" style="background:${u.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)'}">
+          <div class="sug-avatar" style="background:${u.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)'}; cursor:pointer;" onclick="viewUserProfile('${uid}')">
             ${u.initials || u.name?.slice(0, 2).toUpperCase() || 'U'}
           </div>
-          <div class="sug-info">
+          <div class="sug-info" style="cursor:pointer;" onclick="viewUserProfile('${uid}')">
             <span class="sug-name">${esc(u.name)}</span>
             <span class="sug-mutual">${esc(u.handle || 'Member')}</span>
           </div>
-          <button class="follow-btn" onclick="showToast('Followed ${esc(u.name)} ✨')">Follow</button>
+          <button class="follow-btn-sm ${following ? 'following' : ''}" onclick="toggleFollowUser('${uid}', this)">${following ? 'Following ✓' : 'Follow'}</button>
         `;
         suggestionsList.appendChild(li);
       });
@@ -1156,11 +1426,17 @@ function renderDMChat(userId) {
     const avatarEl = document.getElementById('chat-peer-avatar');
     if (avatarEl) {
       avatarEl.style.display = '';
+      avatarEl.style.cursor = 'pointer';
+      avatarEl.onclick = () => viewUserProfile(userId);
       avatarEl.style.background = user.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)';
       avatarEl.textContent = user.initials || user.name?.slice(0, 2).toUpperCase() || 'U';
     }
     const nameEl = document.getElementById('chat-peer-name');
-    if (nameEl) nameEl.textContent = user.name;
+    if (nameEl) {
+      nameEl.textContent = user.name;
+      nameEl.style.cursor = 'pointer';
+      nameEl.onclick = () => viewUserProfile(userId);
+    }
     const statusEl = document.getElementById('chat-peer-status');
     if (statusEl) statusEl.textContent = 'Active now';
     const inputEl = document.getElementById('chat-input');
@@ -1579,19 +1855,11 @@ function attachEventListeners() {
     thumbArea.addEventListener('click', () => thumbInput.click());
   }
 
-  // Follow buttons
+  // Forward legacy toggleFollow if called
   window.toggleFollow = function(btn) {
-    btn.textContent = btn.textContent === 'Follow' ? 'Following ✓' : 'Follow';
-    btn.style.background = btn.textContent === 'Follow' ? '' : 'var(--accent)';
-    btn.style.color = btn.textContent === 'Follow' ? '' : '#fff';
-    showToast(btn.textContent === 'Following ✓' ? '✅ You are now following this user' : 'Unfollowed');
+    const uid = btn.dataset?.user;
+    if (uid) toggleFollowUser(uid, btn);
   };
-
-  document.querySelectorAll('.follow-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-      window.toggleFollow(this);
-    });
-  });
 
   // Close notif panel on outside click
   document.addEventListener('click', e => {
@@ -1692,6 +1960,9 @@ function attachEventListeners() {
 
 // ─── INIT & BOOT ──────────────────────────────────────────────
 function init() {
+  // 1. Permanently purge any legacy dummy data (Sarah, Maya, Leo, Liam, Zoe, etc.) from storage
+  purgeLegacyDummyData();
+
   // Theme initialization
   const savedTheme = localStorage.getItem(STORAGE.THEME);
   const themeToggle = document.getElementById('theme-toggle');
@@ -1700,11 +1971,12 @@ function init() {
     if (themeToggle) themeToggle.checked = true;
   }
 
-  // Init & Boot
+  // Init & Boot state
   state.posts = loadPosts();
   state.dmMessages = loadDMs();
   state.savedPosts = loadSavedPosts();
   state.dmSettings = loadDMSettings();
+  state.following = loadFollowing();
 
   // Attach event handlers
   attachEventListeners();
@@ -1719,9 +1991,9 @@ function init() {
   renderOnlineMembers();
   renderFriendsList();
 
-  // Select first available conversation if any exist, otherwise clear chat panel
+  // Select first available real conversation if any exist, otherwise clear chat panel
   const currentId = state.currentUser ? state.currentUser.id : null;
-  const others = Object.keys(USERS).filter(u => u !== currentId);
+  const others = Object.keys(USERS).filter(u => u !== currentId && !DUMMY_IDS.has(u.toLowerCase()) && !isDummyUser(USERS[u], u));
   if (others.length) {
     renderDMChat(others[0]);
   } else {
@@ -1758,6 +2030,11 @@ window.confirmDeleteConversation = confirmDeleteConversation;
 window.closeDMConfirm = closeDMConfirm;
 window.deleteConversation = deleteConversation;
 window.renderFriendsList = renderFriendsList;
+window.viewUserProfile = viewUserProfile;
+window.startChatWithUser = startChatWithUser;
+window.toggleFollowUser = toggleFollowUser;
+window.isFollowing = isFollowing;
+window.setFeedTab = setFeedTab;
 
 // ─── Boot ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);

@@ -2466,3 +2466,150 @@ body.light-theme .auth-error { background: rgba(239,68,68,0.07); color: #dc2626;
   transform: translateY(-1px);
   box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
 }
+
+/* ─── Twitter-style Feed Tabs ─── */
+.feed-tabs-bar {
+  display: flex;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  position: relative;
+}
+
+.feed-tab-btn {
+  flex: 1;
+  padding: 13px 16px;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 14.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: all var(--ease);
+}
+
+.feed-tab-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.feed-tab-btn.active {
+  color: var(--text-1);
+  font-weight: 800;
+}
+
+.feed-tab-indicator {
+  width: 0;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width 0.25s ease;
+}
+
+.feed-tab-btn.active .feed-tab-indicator {
+  width: 48px;
+}
+
+/* Clickable user links */
+.post-user-avatar, .post-user-name, .friend-item, .online-friend, .comment-avatar, .comment-author {
+  cursor: pointer;
+}
+.post-user-name:hover, .comment-author:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* Profile Action Buttons */
+.profile-actions-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.profile-follow-btn {
+  padding: 8px 22px;
+  border-radius: 99px;
+  border: none;
+  font-size: 13.5px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  transition: all var(--ease);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.profile-follow-btn:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.profile-follow-btn.following {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-1);
+}
+
+.profile-follow-btn.following:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.profile-msg-btn {
+  padding: 8px 18px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-1);
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--ease);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.profile-msg-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.follow-btn-sm {
+  padding: 3px 12px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-1);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--ease);
+}
+
+.follow-btn-sm:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.follow-btn-sm.following {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
