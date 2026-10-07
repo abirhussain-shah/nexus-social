@@ -5,6 +5,40 @@
    Full-featured social & messaging web application
    ============================================================ */
 
+// ─── Firebase Cloud Setup ─────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyCGhR4_M4pfLwiphauCPO7O_53HsguUo5I",
+  authDomain: "nexus-social-13cd3.firebaseapp.com",
+  projectId: "nexus-social-13cd3",
+  storageBucket: "nexus-social-13cd3.firebasestorage.app",
+  messagingSenderId: "606825690972",
+  appId: "1:606825690972:web:8bce3f36e6a3905a513399",
+  measurementId: "G-QYXFW63938"
+};
+
+let db = null;
+let isFirebaseReady = false;
+
+function initFirebase() {
+  try {
+    if (typeof firebase !== 'undefined') {
+      if (firebase.apps.length === 0) {
+        firebase.initializeApp(firebaseConfig);
+      }
+      db = firebase.firestore();
+      isFirebaseReady = true;
+      console.log('🔥 Firebase Cloud connected successfully!');
+
+      // Start listening for real-time cloud data
+      listenToCloudUsers();
+      listenToCloudPosts();
+      listenToCloudMessages();
+    }
+  } catch (err) {
+    console.warn('Firebase initialization warning:', err);
+  }
+}
+
 // ─── Storage Keys ─────────────────────────────────────────────
 const STORAGE = {
   USERS: 'nexus_users_db',
@@ -301,13 +335,34 @@ function handleLogin() {
     (u.id && u.id.toLowerCase() === email)
   );
 
-  if (!user || user.password !== password) {
-    showAuthError(errEl, 'Invalid email or password. Please try again.');
+  if (user && user.password === password) {
+    if (errEl) errEl.style.display = 'none';
+    loginUser(user);
     return;
   }
 
-  if (errEl) errEl.style.display = 'none';
-  loginUser(user);
+  // If not found locally, check Firebase Cloud Database for multi-device sync
+  if (db) {
+    db.collection('users').where('email', '==', email).get().then(snapshot => {
+      if (!snapshot.empty) {
+        const cloudUser = snapshot.docs[0].data();
+        if (cloudUser && cloudUser.password === password) {
+          users[cloudUser.id] = cloudUser;
+          saveStoredUsers(users);
+          USERS[cloudUser.id] = cloudUser;
+          if (errEl) errEl.style.display = 'none';
+          loginUser(cloudUser);
+          return;
+        }
+      }
+      showAuthError(errEl, 'Invalid email or password. Please try again.');
+    }).catch(() => {
+      showAuthError(errEl, 'Invalid email or password. Please try again.');
+    });
+    return;
+  }
+
+  showAuthError(errEl, 'Invalid email or password. Please try again.');
 }
 
 function handleRegister() {
@@ -372,25 +427,28 @@ function handleRegister() {
     handle,
     initials,
     gradient,
-    bio: 'Hey there! I just joined Nexus Social ✨'
+    bio: 'Hey there! I just joined Nexus Social ✨',
+    createdAt: Date.now()
   };
 
+  // Local storage
   users[id] = newUser;
   saveStoredUsers(users);
   USERS[id] = newUser;
 
-  // Add welcome DMs for new member
-  if (!state.dmMessages) state.dmMessages = {};
-  state.dmMessages['sarah'] = [
-    { from: 'sarah', text: `Hi ${name}! Welcome to Nexus Social 🎉 Wonderful to have you here!`, time: 'Just now' }
-  ];
-  state.dmMessages['maya'] = [
-    { from: 'maya', text: `Hey ${name}! Welcome to the platform ✨ Reach out if you need anything!`, time: 'Just now' }
-  ];
-  saveDMs(state.dmMessages);
+  // Cloud Firestore database sync
+  if (db) {
+    db.collection('users').doc(id).set(newUser).then(() => {
+      console.log('✅ User profile successfully saved to Firebase Cloud!');
+    }).catch(e => {
+      console.warn('Firebase user save error:', e);
+    });
+  }
 
   if (errEl) errEl.style.display = 'none';
   loginUser(newUser);
+  renderDMUserList();
+  renderOnlineMembers();
   showToast(`🎉 Welcome to Nexus Social, ${name}!`);
 }
 
@@ -706,6 +764,195 @@ function updateProfileStats() {
   myPosts.forEach(p => profilePosts.appendChild(createPostCard(p)));
 }
 
+// ─── CLOUD SYNC & REAL-TIME LISTENERS ─────────────────────────
+function listenToCloudUsers() {
+  if (!db) return;
+  try {
+    db.collection('users').onSnapshot(snapshot => {
+      let changed = false;
+      snapshot.forEach(doc => {
+        const u = doc.data();
+        if (u && u.id) {
+          USERS[u.id] = { ...DEFAULT_USERS[u.id], ...u };
+          changed = true;
+        }
+      });
+      if (changed) {
+        saveStoredUsers(USERS);
+        renderDMUserList();
+        renderOnlineMembers();
+      }
+    }, err => {
+      console.warn('Firestore users subscription warning:', err);
+    });
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+function listenToCloudPosts() {
+  if (!db) return;
+  try {
+    db.collection('posts').orderBy('timestamp', 'desc').limit(50).onSnapshot(snapshot => {
+      if (snapshot.empty) return;
+      const cloudPosts = [];
+      snapshot.forEach(doc => {
+        cloudPosts.push({ id: doc.id, ...doc.data() });
+      });
+      if (cloudPosts.length > 0) {
+        const cloudIds = new Set(cloudPosts.map(p => p.id));
+        const locals = state.posts.filter(p => !cloudIds.has(p.id));
+        state.posts = [...cloudPosts, ...locals];
+        savePosts(state.posts);
+        renderFeed();
+        updateProfileStats();
+      }
+    }, err => {
+      console.warn('Firestore posts subscription warning:', err);
+    });
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+function listenToCloudMessages() {
+  if (!db) return;
+  try {
+    db.collection('messages').orderBy('timestamp', 'asc').limitToLast(100).onSnapshot(snapshot => {
+      if (snapshot.empty) return;
+      let hasUpdateForActive = false;
+
+      snapshot.forEach(doc => {
+        const msg = doc.data();
+        if (!msg || !msg.from || !msg.to) return;
+        const currentId = state.currentUser ? state.currentUser.id : 'you';
+
+        if (msg.from === currentId) {
+          const peer = msg.to;
+          if (!state.dmMessages[peer]) state.dmMessages[peer] = [];
+          if (!state.dmMessages[peer].some(m => m.id === doc.id || (m.timestamp && m.timestamp === msg.timestamp))) {
+            state.dmMessages[peer].push({ ...msg, id: doc.id });
+            if (peer === state.activeDM) hasUpdateForActive = true;
+          }
+        } else if (msg.to === currentId) {
+          const peer = msg.from;
+          if (!state.dmMessages[peer]) state.dmMessages[peer] = [];
+          if (!state.dmMessages[peer].some(m => m.id === doc.id || (m.timestamp && m.timestamp === msg.timestamp))) {
+            state.dmMessages[peer].push({ ...msg, id: doc.id });
+            if (peer === state.activeDM) {
+              hasUpdateForActive = true;
+            } else {
+              showToast(`💬 New message from ${USERS[peer]?.name || 'a member'}`);
+            }
+          }
+        }
+      });
+
+      saveDMs(state.dmMessages);
+      renderDMUserList();
+      if (hasUpdateForActive && state.view === 'messages') {
+        renderDMChat(state.activeDM);
+      }
+    }, err => {
+      console.warn('Firestore messages subscription warning:', err);
+    });
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+// ─── DYNAMIC USER & MEMBERS LIST ──────────────────────────────
+function renderDMUserList(query = '') {
+  const dmList = document.getElementById('dm-list');
+  if (!dmList) return;
+
+  const currentId = state.currentUser ? state.currentUser.id : 'you';
+  const allUserIds = Object.keys(USERS).filter(uid => uid !== currentId);
+
+  const q = (query || '').toLowerCase().trim();
+  const filteredIds = allUserIds.filter(uid => {
+    const u = USERS[uid];
+    if (!u) return false;
+    if (!q) return true;
+    return (
+      (u.name && u.name.toLowerCase().includes(q)) ||
+      (u.handle && u.handle.toLowerCase().includes(q))
+    );
+  });
+
+  dmList.innerHTML = '';
+
+  if (filteredIds.length === 0) {
+    dmList.innerHTML = `
+      <li style="padding:24px 16px;text-align:center;color:var(--text-3);font-size:13px;">
+        ${q ? 'No members matching "' + esc(q) + '"' : 'No other members registered yet.'}
+      </li>
+    `;
+    return;
+  }
+
+  filteredIds.forEach(uid => {
+    const u = USERS[uid];
+    const msgs = state.dmMessages[uid] || [];
+    const lastMsg = msgs[msgs.length - 1];
+    const previewText = lastMsg ? lastMsg.text : 'Click to start chatting ✨';
+    const previewTime = lastMsg ? (lastMsg.time || '') : '';
+    const isActive = state.activeDM === uid;
+
+    const li = document.createElement('li');
+    li.className = `dm-item ${isActive ? 'active' : ''}`;
+    li.dataset.user = uid;
+    li.innerHTML = `
+      <div class="dm-avatar" style="background:${u.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)'}">
+        ${u.initials || u.name?.slice(0, 2).toUpperCase() || 'U'}
+        <div class="status-dot online"></div>
+      </div>
+      <div class="dm-info">
+        <span class="dm-name">${esc(u.name)} <span style="font-size:11px;font-weight:400;color:var(--text-3);">${esc(u.handle || '')}</span></span>
+        <span class="dm-preview">${esc(previewText)}</span>
+      </div>
+      <div class="dm-meta">
+        <span class="dm-time">${previewTime}</span>
+      </div>
+    `;
+
+    li.addEventListener('click', () => {
+      renderDMChat(uid);
+    });
+
+    dmList.appendChild(li);
+  });
+}
+
+function renderOnlineMembers() {
+  const onlineList = document.getElementById('online-friends-list');
+  if (!onlineList) return;
+
+  const currentId = state.currentUser ? state.currentUser.id : 'you';
+  const members = Object.keys(USERS).filter(uid => uid !== currentId);
+
+  onlineList.innerHTML = '';
+  members.slice(0, 8).forEach(uid => {
+    const u = USERS[uid];
+    const li = document.createElement('li');
+    li.className = 'online-friend';
+    li.dataset.user = uid;
+    li.style.cursor = 'pointer';
+    li.innerHTML = `
+      <div class="of-avatar" style="background:${u.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)'}">
+        ${u.initials || 'U'}
+        <div class="status-dot online"></div>
+      </div>
+      <span>${esc(u.name)}</span>
+    `;
+    li.addEventListener('click', () => {
+      switchView('messages');
+      renderDMChat(uid);
+    });
+    onlineList.appendChild(li);
+  });
+}
+
 // ─── RENDER DM CHAT ───────────────────────────────────────────
 function renderDMChat(userId) {
   state.activeDM = userId;
@@ -726,8 +973,8 @@ function renderDMChat(userId) {
   if (user) {
     const avatarEl = document.getElementById('chat-peer-avatar');
     if (avatarEl) {
-      avatarEl.style.background = user.gradient;
-      avatarEl.textContent = user.initials;
+      avatarEl.style.background = user.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)';
+      avatarEl.textContent = user.initials || user.name?.slice(0, 2).toUpperCase() || 'U';
     }
     const nameEl = document.getElementById('chat-peer-name');
     if (nameEl) nameEl.textContent = user.name;
@@ -759,7 +1006,6 @@ function createChatBubble(msg) {
   const row = document.createElement('div');
   row.className = `chat-msg-row${isOwn ? ' own' : ''}`;
 
-  // Consecutive message grouping (hide avatar if same sender as next)
   const ticks = isOwn
     ? `<span class="bubble-ticks ${msg.read ? 'read' : ''}">
          <svg width="14" height="9" viewBox="0 0 16 10" fill="currentColor">
@@ -770,7 +1016,7 @@ function createChatBubble(msg) {
     : '';
 
   row.innerHTML = `
-    ${!isOwn ? `<div class="chat-msg-bubble-avatar" style="background:${user.gradient}">${user.initials}</div>` : ''}
+    ${!isOwn ? `<div class="chat-msg-bubble-avatar" style="background:${user.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)'}">${user.initials || 'U'}</div>` : ''}
     <div class="chat-msg-bubble">
       ${esc(msg.text).replace(/\n/g,'<br>')}
       <div class="bubble-footer">
@@ -794,10 +1040,13 @@ function sendChatMessage() {
   const currentId = state.currentUser ? state.currentUser.id : 'you';
   const now = new Date();
   const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const msg = { from: currentId, text, time, read: false };
+  const timestamp = Date.now();
+  const targetUser = state.activeDM;
 
-  if (!state.dmMessages[state.activeDM]) state.dmMessages[state.activeDM] = [];
-  state.dmMessages[state.activeDM].push(msg);
+  const msg = { from: currentId, to: targetUser, text, time, timestamp, read: false };
+
+  if (!state.dmMessages[targetUser]) state.dmMessages[targetUser] = [];
+  state.dmMessages[targetUser].push(msg);
   saveDMs(state.dmMessages);
 
   chatInput.textContent = '';
@@ -805,22 +1054,29 @@ function sendChatMessage() {
   chatMessages.appendChild(bubble);
   scrollChatToBottom();
 
-  // Update DM sidebar preview
-  const dmEl = document.querySelector(`.dm-item[data-user="${state.activeDM}"]`);
-  if (dmEl) {
-    const preview = dmEl.querySelector('.dm-preview');
-    const timeEl  = dmEl.querySelector('.dm-time');
-    if (preview) preview.textContent = text;
-    if (timeEl)  timeEl.textContent  = time;
+  renderDMUserList();
+
+  // Sync to Firebase Cloud
+  if (db) {
+    db.collection('messages').add({
+      from: currentId,
+      to: targetUser,
+      text: text,
+      time: time,
+      timestamp: timestamp
+    }).then(docRef => {
+      msg.id = docRef.id;
+    }).catch(err => {
+      console.warn('Firebase message send warning:', err);
+    });
   }
 
-  // Message status: delivered
   setTimeout(() => {
     const ticks = bubble.querySelector('.bubble-ticks');
     if (ticks) ticks.classList.add('read');
     msg.read = true;
     saveDMs(state.dmMessages);
-  }, 1000);
+  }, 600);
 }
 
 // ─── POST ACTIONS ─────────────────────────────────────────────
@@ -949,7 +1205,8 @@ function switchPostType(type) {
 function submitPost() {
   const type = currentPostType;
   const currentId = state.currentUser ? state.currentUser.id : 'you';
-  let post = { id: 'p' + Date.now(), type, user: currentId, time: 'Just now', likes: 0, likedByMe: false, shares: 0, comments: [], showComments: false };
+  const timestamp = Date.now();
+  let post = { id: 'p' + timestamp, type, user: currentId, time: 'Just now', timestamp, likes: 0, likedByMe: false, shares: 0, comments: [], showComments: false };
 
   if (type === 'text') {
     const text = document.getElementById('post-text-input').textContent.trim();
@@ -961,11 +1218,18 @@ function submitPost() {
     post.type = 'text';
   }
 
-  // Prepend to posts & persist
+  // Prepend to posts & persist locally
   state.posts.unshift(post);
   savePosts(state.posts);
   renderFeed();
   updateProfileStats();
+
+  // Sync to Firebase Cloud
+  if (db) {
+    db.collection('posts').doc(post.id).set(post).catch(err => {
+      console.warn('Firebase post sync warning:', err);
+    });
+  }
 
   // Close modal & reset
   createPostOverlay.style.display = 'none';
@@ -1185,16 +1449,7 @@ function attachEventListeners() {
   const msgSearch = document.getElementById('msg-search');
   if (msgSearch) {
     msgSearch.addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase().trim();
-      document.querySelectorAll('.dm-item').forEach(item => {
-        const name = item.querySelector('.dm-name')?.textContent.toLowerCase() || '';
-        const preview = item.querySelector('.dm-preview')?.textContent.toLowerCase() || '';
-        if (!q || name.includes(q) || preview.includes(q)) {
-          item.style.display = 'flex';
-        } else {
-          item.style.display = 'none';
-        }
-      });
+      renderDMUserList(e.target.value);
     });
   }
 
@@ -1240,6 +1495,35 @@ function attachEventListeners() {
   });
 }
 
+// ─── INIT & BOOT ──────────────────────────────────────────────
+function init() {
+  // Theme initialization
+  const savedTheme = localStorage.getItem(STORAGE.THEME);
+  const themeToggle = document.getElementById('theme-toggle');
+  if (savedTheme === 'light') {
+    document.body.classList.add('light-theme');
+    if (themeToggle) themeToggle.checked = true;
+  }
+
+  // Load local state
+  state.posts = loadPosts();
+  state.dmMessages = loadDMs();
+  state.savedPosts = loadSavedPosts();
+
+  // Attach event handlers
+  attachEventListeners();
+
+  // Check user authentication session
+  checkAuthSession();
+
+  // Render initial dynamic member lists
+  renderDMUserList();
+  renderOnlineMembers();
+
+  // Connect to Firebase Cloud Database for multi-device sync
+  initFirebase();
+}
+
 // ─── Expose globals for inline handlers ──────────────────────
 window.toggleLike = toggleLike;
 window.toggleComments = toggleComments;
@@ -1255,6 +1539,7 @@ window.handleRegister = handleRegister;
 window.handleForgotPassword = handleForgotPassword;
 window.logout = logout;
 window.renderDMChat = renderDMChat;
+window.renderDMUserList = renderDMUserList;
 window.showToast = showToast;
 
 // ─── Boot ─────────────────────────────────────────────────────

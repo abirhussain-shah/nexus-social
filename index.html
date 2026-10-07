@@ -657,7 +657,7 @@
 
       <div class="right-sidebar-section">
         <div class="rs-label">People You May Know</div>
-        <ul class="suggestions-list">
+        <ul class="suggestions-list" id="suggestions-list">
           <li class="suggestion-item">
             <div class="sug-avatar" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">A</div>
             <div class="sug-info"><span class="sug-name">Alex M.</span><span class="sug-mutual">3 mutual friends</span>
@@ -680,8 +680,8 @@
       </div>
 
       <div class="right-sidebar-section">
-        <div class="rs-label">Online Friends</div>
-        <ul class="online-friends-list">
+        <div class="rs-label">Active Members</div>
+        <ul class="online-friends-list" id="online-friends-list">
           <li class="online-friend" data-user="sarah">
             <div class="of-avatar" style="background:linear-gradient(135deg,#a855f7,#6366f1)">S<div
                 class="status-dot online"></div>
@@ -810,6 +810,10 @@
   <!-- Hidden inputs -->
   <input type="file" id="chat-file-input" style="display:none" accept="image/*,application/pdf,.doc,.docx" />
 
+  <!-- Firebase App & Firestore SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <script src="app.js"></script>
 </body>
 
