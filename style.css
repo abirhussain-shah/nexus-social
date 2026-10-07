@@ -2613,3 +2613,16 @@ body.light-theme .auth-error { background: rgba(239,68,68,0.07); color: #dc2626;
   color: #fff;
   border-color: var(--accent);
 }
+
+
+/* ── Mobile messaging: show the chat list OR the open chat ── */
+.chat-back-btn { display: none; }
+@media (max-width: 768px) {
+  .chat-back-btn { display: inline-flex; }
+  .chat-panel-home-btn { display: none; }
+  body.messages-active .msg-sidebar { flex: 1 1 100% !important; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
+  body.messages-active:not(.chat-open) .chat-panel { display: none !important; }
+  body.messages-active.chat-open .msg-sidebar { display: none !important; }
+  body.messages-active.chat-open .chat-panel { display: flex !important; width: 100% !important; flex: 1 1 100% !important; }
+  .chat-input { font-size: 16px; }
+}
