@@ -1109,6 +1109,19 @@ function toggleFollowUser(userId, btnEl) {
     state.following.push(userId);
     nowFollowing = true;
     showToast(`✨ You are now following ${userName}! Their posts will appear in your "Following" feed.`);
+
+    // Send notification to followed user
+    if (db && state.currentUser) {
+      db.collection('notifications').add({
+        to: userId,
+        actorId: state.currentUser.id,
+        actorName: state.currentUser.name,
+        type: 'follow',
+        text: 'started following you',
+        time: 'Just now',
+        timestamp: Date.now()
+      }).catch(() => { });
+    }
   }
 
   saveFollowing(state.following);
