@@ -1763,10 +1763,11 @@ input,
 /* ── WhatsApp Chat Background ── */
 .chat-messages {
   flex: 1 1 0% !important;
+  height: 0 !important;
   min-height: 0 !important;
   max-height: 100% !important;
   overflow-y: auto !important;
-  overflow-x: hidden;
+  overflow-x: hidden !important;
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
@@ -1774,6 +1775,8 @@ input,
   background: var(--wa-bg);
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
 }
 
 .chat-messages::-webkit-scrollbar {
@@ -2746,6 +2749,8 @@ body.light-theme .bubble-ticks.read {
    ============================================ */
 body.messages-active {
   overflow: hidden !important;
+  height: 100vh !important;
+  height: 100dvh !important;
 }
 
 body.messages-active .left-sidebar,
@@ -2754,12 +2759,18 @@ body.messages-active .right-sidebar {
 }
 
 body.messages-active .main-layout {
-  grid-template-columns: 1fr !important;
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: none !important;
   max-width: 100% !important;
   width: 100% !important;
   padding: 0 !important;
   margin: var(--nav-h) 0 0 0 !important;
   height: calc(100vh - var(--nav-h)) !important;
+  height: calc(100dvh - var(--nav-h)) !important;
+  max-height: calc(100vh - var(--nav-h)) !important;
+  max-height: calc(100dvh - var(--nav-h)) !important;
+  min-height: 0 !important;
   overflow: hidden !important;
 }
 
@@ -2769,11 +2780,17 @@ body.messages-active .content-area {
   padding: 0 !important;
   margin: 0 !important;
   height: 100% !important;
-  min-height: unset !important;
+  max-height: 100% !important;
+  min-height: 0 !important;
+  flex: 1 1 0% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
 }
 
 body.messages-active #view-messages {
   display: flex !important;
+  flex-direction: row !important;
   height: 100% !important;
   max-height: 100% !important;
   min-height: 0 !important;
@@ -2783,20 +2800,36 @@ body.messages-active #view-messages {
   border: none !important;
   box-shadow: none !important;
   overflow: hidden !important;
+  flex: 1 1 0% !important;
 }
 
 body.messages-active .msg-sidebar {
   width: 350px !important;
-  min-width: 300px !important;
+  min-width: 280px !important;
   max-width: 400px !important;
   height: 100% !important;
+  max-height: 100% !important;
   min-height: 0 !important;
   border-radius: 0 !important;
   overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex-shrink: 0 !important;
+}
+
+body.messages-active .dm-list {
+  flex: 1 1 0% !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
 }
 
 body.messages-active .chat-panel {
-  flex: 1 !important;
+  flex: 1 1 0% !important;
   width: 100% !important;
   height: 100% !important;
   max-height: 100% !important;
@@ -2805,6 +2838,24 @@ body.messages-active .chat-panel {
   display: flex !important;
   flex-direction: column !important;
   overflow: hidden !important;
+  position: relative !important;
+}
+
+body.messages-active .chat-messages {
+  flex: 1 1 0% !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+body.messages-active .chat-input-area {
+  flex-shrink: 0 !important;
+  position: relative !important;
+  z-index: 10 !important;
 }
 
 .chat-home-btn {
