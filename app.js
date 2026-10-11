@@ -66,6 +66,18 @@ async function initSignalR() {
       handleIncomingLiveMessage(fromUserId, messageData);
     });
 
+    // Real-time peer registration across browser windows & incognito sessions
+    signalRConn.on('UserRegistered', (userId, userInfo) => {
+      if (userId && userInfo && state.currentUser && userId !== state.currentUser.id) {
+        USERS[userId] = userInfo;
+        const stored = getStoredUsers();
+        stored[userId] = userInfo;
+        saveStoredUsers(stored);
+        renderDMUserList();
+        renderOnlineMembers();
+      }
+    });
+
     // Real-time member presence (online status)
     signalRConn.on('UserPresenceChanged', (userId, isOnline) => {
       handleUserPresenceChanged(userId, isOnline);
@@ -99,7 +111,7 @@ async function initSignalR() {
 
     signalRConn.onreconnected(() => {
       if (state.currentUser) {
-        signalRConn.invoke('RegisterUser', state.currentUser.id).catch(() => { });
+        registerSignalRUser();
       }
     });
 
@@ -110,77 +122,177 @@ async function initSignalR() {
     if (state.currentUser) {
       registerSignalRUser();
     }
+
+    // Sync registered users from backend server
+    syncServerUsers();
   } catch (err) {
     console.info('.NET 8 SignalR Hub notice (normal in static file mode):', err.message || err);
     isSignalRConnected = false;
   }
 }
 
+async function syncServerUsers() {
+  try {
+    const res = await fetch('/api/users');
+    if (res.ok) {
+      const serverUsers = await res.json();
+      if (Array.isArray(serverUsers)) {
+        const stored = getStoredUsers();
+        let updated = false;
+        serverUsers.forEach(u => {
+          if (u && u.id && !isDummyUser(u, u.id)) {
+            USERS[u.id] = { ...(USERS[u.id] || {}), ...u };
+            stored[u.id] = USERS[u.id];
+            updated = true;
+          }
+        });
+        if (updated) {
+          saveStoredUsers(stored);
+          renderDMUserList();
+          renderOnlineMembers();
+        }
+      }
+    }
+  } catch (e) { }
+}
+
 function registerSignalRUser() {
   if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected && state.currentUser) {
-    signalRConn.invoke('RegisterUser', state.currentUser.id)
-      .then(() => console.log('✅ SignalR user registered:', state.currentUser.id))
+    const userInfo = {
+      id: state.currentUser.id,
+      name: state.currentUser.name,
+      handle: state.currentUser.handle,
+      initials: state.currentUser.initials,
+      gradient: state.currentUser.gradient
+    };
+    signalRConn.invoke('RegisterUser', state.currentUser.id, userInfo)
+      .then(() => {
+        console.log('✅ SignalR user registered:', state.currentUser.id);
+        fetch('/api/users/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(userInfo)
+        }).catch(() => { });
+      })
       .catch(err => console.warn('SignalR RegisterUser notice:', err));
   }
 }
 
 function handleIncomingLiveMessage(fromUserId, messageData) {
-  if (!fromUserId || !messageData) return;
+  if (!messageData) return;
   const currentId = state.currentUser ? state.currentUser.id : null;
   if (!currentId) return;
 
-  if (!state.dmMessages[fromUserId]) state.dmMessages[fromUserId] = [];
+  // Resolve true sender ID from messageData first, then fallback to fromUserId
+  let senderId = (messageData && (messageData.from || messageData.fromUserId || messageData.sender)) || fromUserId;
+  if (!senderId || senderId === 'anonymous') {
+    if (messageData && messageData.senderInfo && messageData.senderInfo.id) {
+      senderId = messageData.senderInfo.id;
+    }
+  }
+  if (!senderId) return;
+
+  // Drop messages explicitly targeted to a different user
+  if (messageData.to && messageData.to !== currentId) {
+    return;
+  }
+
+  // Drop own sent message echo
+  if (senderId === currentId) {
+    return;
+  }
+
+  // Hydrate sender details into USERS and persistent storage
+  if (messageData.senderInfo) {
+    USERS[senderId] = { ...(USERS[senderId] || {}), ...messageData.senderInfo };
+    const stored = getStoredUsers();
+    stored[senderId] = USERS[senderId];
+    saveStoredUsers(stored);
+  } else if (!USERS[senderId]) {
+    const stored = getStoredUsers();
+    if (stored[senderId]) USERS[senderId] = stored[senderId];
+    else {
+      USERS[senderId] = {
+        id: senderId,
+        name: 'Member',
+        initials: 'M',
+        gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)'
+      };
+    }
+  }
+
+  if (!state.dmMessages[senderId]) state.dmMessages[senderId] = [];
+
+  const text = messageData.text || messageData.content || '';
+  const time = messageData.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const timestamp = messageData.timestamp || Date.now();
 
   // Deduplicate against local & cloud messages
-  const existing = state.dmMessages[fromUserId].some(m =>
+  const existing = state.dmMessages[senderId].some(m =>
     (m.id && messageData.id && m.id === messageData.id) ||
-    (m.timestamp && messageData.timestamp && Math.abs(m.timestamp - messageData.timestamp) < 1500 && m.text === messageData.text)
+    (m.timestamp && Math.abs(m.timestamp - timestamp) < 1500 && m.text === text)
+  );
+  if (existing) return;
+
+  // The receiver is actively chatting with the sender if:
+  // 1) Messages view is currently active (state.view === 'messages' or #view-messages is visible)
+  // 2) AND activeDM matches senderId (or senderId is the only peer)
+  const isMessagesViewActive = state.view === 'messages' ||
+    document.getElementById('view-messages')?.classList.contains('active');
+
+  let isActivelyChattingWithSender = (
+    isMessagesViewActive && (
+      state.activeDM === senderId ||
+      (USERS[state.activeDM] && USERS[state.activeDM].id === senderId)
+    )
   );
 
-  if (!existing) {
-    // Ensure peer user info is populated in USERS
-    if (!USERS[fromUserId]) {
-      const stored = getStoredUsers();
-      if (stored[fromUserId]) USERS[fromUserId] = stored[fromUserId];
-    }
-
-    const isActivelyChattingWithSender = (state.activeDM === fromUserId && state.view === 'messages');
-    const formattedMsg = {
-      from: fromUserId,
-      to: currentId,
-      text: messageData.text || messageData.content || '',
-      time: messageData.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      timestamp: messageData.timestamp || Date.now(),
-      read: isActivelyChattingWithSender
-    };
-    state.dmMessages[fromUserId].push(formattedMsg);
-    saveDMs(state.dmMessages);
-
-    if (isActivelyChattingWithSender) {
-      const bubble = createChatBubble(formattedMsg);
-      const chatMsgContainer = document.getElementById('chat-messages');
-      if (chatMsgContainer) {
-        chatMsgContainer.appendChild(bubble);
-        scrollChatToBottom();
-      }
-    } else {
-      const sender = USERS[fromUserId] || { name: 'Member' };
-      showToast(`💬 ${sender.name}: ${formattedMsg.text.slice(0, 32)}`);
-      addNotification({
-        type: 'message',
-        actorId: fromUserId,
-        actorName: sender.name,
-        actorGradient: sender.gradient,
-        actorInitials: sender.initials,
-        targetId: fromUserId,
-        text: `sent you a message: "${formattedMsg.text.slice(0, 30)}..."`,
-        time: formattedMsg.time || 'Just now',
-        timestamp: formattedMsg.timestamp || Date.now()
-      });
-    }
-
-    renderDMUserList();
+  // If user is already on the messages view but no conversation was explicitly selected yet, auto-select this sender
+  if (isMessagesViewActive && !state.activeDM) {
+    state.activeDM = senderId;
+    isActivelyChattingWithSender = true;
+    renderDMChat(senderId);
   }
+
+  const formattedMsg = {
+    from: senderId,
+    to: currentId,
+    text: text,
+    time: time,
+    timestamp: timestamp,
+    read: isActivelyChattingWithSender
+  };
+
+  state.dmMessages[senderId].push(formattedMsg);
+  saveDMs(state.dmMessages);
+
+  if (isActivelyChattingWithSender) {
+    const bubble = createChatBubble(formattedMsg);
+    const chatMsgContainer = document.getElementById('chat-messages');
+    if (chatMsgContainer) {
+      chatMsgContainer.appendChild(bubble);
+      scrollChatToBottom();
+    }
+  } else {
+    state.dmSettings[senderId] = { ...(state.dmSettings[senderId] || {}), unread: true };
+    saveDMSettings();
+
+    const sender = USERS[senderId] || (messageData && messageData.senderInfo) || { name: 'Member' };
+    showToast(`💬 ${sender.name}: ${text.slice(0, 32)}`);
+    addNotification({
+      type: 'message',
+      actorId: senderId,
+      actorName: sender.name,
+      actorGradient: sender.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)',
+      actorInitials: sender.initials || sender.name?.slice(0, 2).toUpperCase() || 'U',
+      targetId: senderId,
+      text: `sent you a message: "${text.slice(0, 30)}..."`,
+      time: time,
+      timestamp: timestamp
+    });
+  }
+
+  renderDMUserList();
 }
 
 function handleUserPresenceChanged(userId, isOnline) {
@@ -1859,6 +1971,13 @@ function startChatWithUser(userId) {
 // ─── RENDER DM CHAT ───────────────────────────────────────────
 function renderDMChat(userId) {
   const chatMsgContainer = document.getElementById('chat-messages');
+
+  // Hydrate user metadata if not yet loaded in USERS
+  if (userId && !USERS[userId]) {
+    const stored = getStoredUsers();
+    if (stored[userId]) USERS[userId] = stored[userId];
+  }
+
   document.body.classList.toggle('chat-open', !!(userId && USERS[userId]));
   if (!userId || !USERS[userId]) {
     state.activeDM = null;
@@ -1977,9 +2096,32 @@ function sendChatMessage() {
   const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const timestamp = Date.now();
   const targetUser = state.activeDM;
-  if (!targetUser || !USERS[targetUser]) { showToast('⚠️ Select a conversation first'); return; }
+  if (!targetUser) { showToast('⚠️ Select a conversation first'); return; }
 
-  const msg = { from: currentId, to: targetUser, text, time, timestamp, read: false };
+  // Ensure target user is hydrated in USERS
+  if (!USERS[targetUser]) {
+    const stored = getStoredUsers();
+    if (stored[targetUser]) {
+      USERS[targetUser] = stored[targetUser];
+    } else {
+      USERS[targetUser] = {
+        id: targetUser,
+        name: 'Member',
+        initials: 'M',
+        gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)'
+      };
+    }
+  }
+
+  const senderInfo = state.currentUser ? {
+    id: state.currentUser.id,
+    name: state.currentUser.name,
+    handle: state.currentUser.handle,
+    initials: state.currentUser.initials,
+    gradient: state.currentUser.gradient
+  } : null;
+
+  const msg = { from: currentId, to: targetUser, text, time, timestamp, read: false, senderInfo };
 
   if (!state.dmMessages[targetUser]) state.dmMessages[targetUser] = [];
   state.dmMessages[targetUser].push(msg);
@@ -1993,6 +2135,7 @@ function sendChatMessage() {
       text: text,
       time: time,
       timestamp: timestamp,
+      senderInfo: senderInfo,
       _t: Date.now()
     }));
   } catch (e) { }
@@ -2011,7 +2154,8 @@ function sendChatMessage() {
       to: targetUser,
       text: text,
       time: time,
-      timestamp: timestamp
+      timestamp: timestamp,
+      senderInfo: senderInfo
     }).catch(err => {
       console.warn('SignalR SendLiveMessage notice:', err);
     });
