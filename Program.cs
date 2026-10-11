@@ -59,6 +59,22 @@ app.UseStaticFiles(new StaticFileOptions
 app.MapHub<NexusHub>("/hubs/nexus");
 
 // ─── REST & SESSION APIS ──────────────────────────────────────
+app.MapGet("/api/users", () => Results.Ok(NexusHub.KnownUsers.Values));
+
+app.MapPost("/api/users/sync", (System.Text.Json.JsonElement userProfile) =>
+{
+    if (userProfile.TryGetProperty("id", out var idProp) || userProfile.TryGetProperty("Id", out idProp))
+    {
+        var id = idProp.GetString();
+        if (!string.IsNullOrWhiteSpace(id))
+        {
+            NexusHub.KnownUsers[id] = userProfile;
+            return Results.Ok(new { success = true });
+        }
+    }
+    return Results.BadRequest(new { error = "Invalid user profile" });
+});
+
 app.MapGet("/api/health", () => Results.Ok(new
 {
     status = "healthy",

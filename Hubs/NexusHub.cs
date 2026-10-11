@@ -8,6 +8,7 @@ public class NexusHub : Hub
     // Maps UserId to active ConnectionIds
     private static readonly ConcurrentDictionary<string, HashSet<string>> UserConnections = new();
     private static readonly ConcurrentDictionary<string, string> ConnectionToUser = new();
+    public static readonly ConcurrentDictionary<string, object> KnownUsers = new();
 
     public override Task OnConnectedAsync()
     {
@@ -35,7 +36,7 @@ public class NexusHub : Hub
         await base.OnDisconnectedAsync(exception);
     }
 
-    public async Task RegisterUser(string userId)
+    public async Task RegisterUser(string userId, object? userInfo = null)
     {
         if (string.IsNullOrWhiteSpace(userId)) return;
 
@@ -46,6 +47,12 @@ public class NexusHub : Hub
             connections.Add(Context.ConnectionId);
         }
 
+        if (userInfo != null)
+        {
+            KnownUsers[userId] = userInfo;
+            await Clients.Others.SendAsync("UserRegistered", userId, userInfo);
+        }
+
         await Clients.Others.SendAsync("UserPresenceChanged", userId, true);
         await Clients.Caller.SendAsync("RegisteredSuccess", userId);
     }
@@ -54,27 +61,61 @@ public class NexusHub : Hub
     public async Task SendLiveMessage(string toUserId, object messageData)
     {
         string? fromUserId = null;
-        if (!ConnectionToUser.TryGetValue(Context.ConnectionId, out fromUserId))
+        string? targetUserId = toUserId;
+
+        // Robustly extract sender and target IDs from messageData
+        if (messageData is System.Text.Json.JsonElement elem)
         {
-            if (messageData is System.Text.Json.JsonElement elem && elem.TryGetProperty("from", out var fromProp))
+            if (elem.TryGetProperty("from", out var pFrom) || elem.TryGetProperty("From", out pFrom))
             {
-                fromUserId = fromProp.GetString();
-                if (!string.IsNullOrWhiteSpace(fromUserId))
+                var s = pFrom.GetString();
+                if (!string.IsNullOrWhiteSpace(s)) fromUserId = s;
+            }
+            if (string.IsNullOrWhiteSpace(targetUserId) && (elem.TryGetProperty("to", out var pTo) || elem.TryGetProperty("To", out pTo)))
+            {
+                var s = pTo.GetString();
+                if (!string.IsNullOrWhiteSpace(s)) targetUserId = s;
+            }
+        }
+        else if (messageData != null)
+        {
+            try
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(messageData);
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("from", out var pFrom) || doc.RootElement.TryGetProperty("From", out pFrom))
                 {
-                    ConnectionToUser[Context.ConnectionId] = fromUserId;
-                    var conns = UserConnections.GetOrAdd(fromUserId, _ => new HashSet<string>());
-                    lock (conns)
-                    {
-                        conns.Add(Context.ConnectionId);
-                    }
+                    var s = pFrom.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) fromUserId = s;
                 }
+                if (string.IsNullOrWhiteSpace(targetUserId) && (doc.RootElement.TryGetProperty("to", out var pTo) || doc.RootElement.TryGetProperty("To", out pTo)))
+                {
+                    var s = pTo.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) targetUserId = s;
+                }
+            }
+            catch { }
+        }
+
+        if (string.IsNullOrWhiteSpace(fromUserId))
+        {
+            ConnectionToUser.TryGetValue(Context.ConnectionId, out fromUserId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(fromUserId))
+        {
+            ConnectionToUser[Context.ConnectionId] = fromUserId;
+            var conns = UserConnections.GetOrAdd(fromUserId, _ => new HashSet<string>());
+            lock (conns)
+            {
+                conns.Add(Context.ConnectionId);
             }
         }
 
         fromUserId ??= "anonymous";
 
-        // Send to recipient if connected
-        if (UserConnections.TryGetValue(toUserId, out var recipientConnections))
+        // Deliver directly to target client connections if found
+        if (!string.IsNullOrWhiteSpace(targetUserId) && UserConnections.TryGetValue(targetUserId, out var recipientConnections))
         {
             List<string> connList;
             lock (recipientConnections)
@@ -83,14 +124,16 @@ public class NexusHub : Hub
             }
             foreach (var connId in connList)
             {
-                await Clients.Client(connId).SendAsync("ReceiveLiveMessage", fromUserId, messageData);
+                if (connId != Context.ConnectionId)
+                {
+                    await Clients.Client(connId).SendAsync("ReceiveLiveMessage", fromUserId, messageData);
+                }
             }
         }
-        else
-        {
-            // Deliver to any clients that might be listening for this user
-            await Clients.Others.SendAsync("ReceiveLiveMessage", fromUserId, messageData);
-        }
+
+        // Deliver to all other connected clients as well; recipient client matches on messageData.to == currentId
+        // This ensures zero dropped messages across reconnects, multiple tabs, and browser profiles
+        await Clients.Others.SendAsync("ReceiveLiveMessage", fromUserId, messageData);
 
         // Acknowledge back to sender
         await Clients.Caller.SendAsync("MessageSentAck", toUserId, messageData);
