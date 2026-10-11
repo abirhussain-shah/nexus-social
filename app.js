@@ -1235,10 +1235,25 @@ function listenToCloudPosts() {
       if (cloudPosts.length > 0) {
         const cloudIds = new Set(cloudPosts.map(p => p.id));
         const locals = state.posts.filter(p => !cloudIds.has(p.id));
+        const previousPosts = state.posts;
         state.posts = [...cloudPosts, ...locals];
         savePosts(state.posts);
-        renderFeed();
-        updateProfileStats();
+
+        // Check if posts were added or deleted
+        const prevIds = new Set(previousPosts.map(p => p.id));
+        const hasStructuralChange = (state.posts.length !== previousPosts.length) ||
+          state.posts.some(p => !prevIds.has(p.id));
+
+        if (hasStructuralChange) {
+          // If a post was added or removed, re-render the feed
+          renderFeed();
+          updateProfileStats();
+        } else {
+          // Smart in-place update: update like status and reaction badges without wiping DOM or resetting scroll position
+          cloudPosts.forEach(p => {
+            updatePostReactionUI(p.id, p);
+          });
+        }
       }
     }, err => {
       console.warn('Firestore posts subscription warning:', err);
@@ -1829,12 +1844,71 @@ function sendChatMessage() {
 }
 
 // ─── POST ACTIONS ─────────────────────────────────────────────
-function toggleLike(postId) {
+function updatePostReactionUI(postId, post) {
+  if (!post) post = state.posts.find(p => p.id === postId);
+  if (!post) return;
+
+  const likeBtns = document.querySelectorAll(`#like-btn-${postId}`);
+  likeBtns.forEach(btn => {
+    if (post.likedByMe) {
+      btn.classList.add('liked');
+    } else {
+      btn.classList.remove('liked');
+    }
+    btn.innerHTML = `
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="${post.likedByMe ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      ${post.likedByMe ? 'Liked' : 'Like'} · ${post.likes}
+    `;
+  });
+
+  // Also update reaction summary banner if present in post card
+  document.querySelectorAll(`#post-${postId}`).forEach(card => {
+    let summaryEl = card.querySelector('.post-reactions-summary');
+    const totalReactions = post.likes;
+    if (totalReactions > 0) {
+      const summaryContent = `
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div class="reactions-icons">
+            <div class="reaction-emoji-icon">❤️</div>
+            ${totalReactions > 10 ? '<div class="reaction-emoji-icon">👍</div>' : ''}
+            ${totalReactions > 30 ? '<div class="reaction-emoji-icon">🔥</div>' : ''}
+          </div>
+          <span>${totalReactions.toLocaleString()}</span>
+        </div>
+        <span>${post.shares || 0} shares · ${(post.comments || []).length} comments</span>
+      `;
+      if (summaryEl) {
+        summaryEl.innerHTML = summaryContent;
+      } else {
+        const actionsEl = card.querySelector('.post-actions');
+        if (actionsEl) {
+          const div = document.createElement('div');
+          div.className = 'post-reactions-summary';
+          div.innerHTML = summaryContent;
+          card.insertBefore(div, actionsEl);
+        }
+      }
+    } else if (summaryEl) {
+      summaryEl.remove();
+    }
+  });
+}
+
+function toggleLike(postId, event) {
+  if (event) {
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  }
   const post = state.posts.find(p => p.id === postId);
   if (!post) return;
   post.likedByMe = !post.likedByMe;
   post.likes += post.likedByMe ? 1 : -1;
+  if (post.likes < 0) post.likes = 0;
   savePosts(state.posts);
+
+  // In-place UI update immediately (no full card replacement, zero scroll jumping)
+  updatePostReactionUI(postId, post);
+
   if (db) {
     const me = state.currentUser ? state.currentUser.id : 'you';
     const FV = firebase.firestore.FieldValue;
@@ -1842,7 +1916,6 @@ function toggleLike(postId) {
       likedBy: post.likedByMe ? FV.arrayUnion(me) : FV.arrayRemove(me)
     }).catch(err => console.warn('Like sync warning:', err));
   }
-  refreshPost(postId);
   showToast(post.likedByMe ? '❤️ You liked this post!' : '💔 Unliked');
 }
 
