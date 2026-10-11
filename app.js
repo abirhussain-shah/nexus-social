@@ -108,11 +108,19 @@ async function initSignalR() {
     console.log('⚡ .NET 8 SignalR Hub connected successfully (/hubs/nexus)');
 
     if (state.currentUser) {
-      signalRConn.invoke('RegisterUser', state.currentUser.id).catch(err => console.warn(err));
+      registerSignalRUser();
     }
   } catch (err) {
     console.info('.NET 8 SignalR Hub notice (normal in static file mode):', err.message || err);
     isSignalRConnected = false;
+  }
+}
+
+function registerSignalRUser() {
+  if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected && state.currentUser) {
+    signalRConn.invoke('RegisterUser', state.currentUser.id)
+      .then(() => console.log('✅ SignalR user registered:', state.currentUser.id))
+      .catch(err => console.warn('SignalR RegisterUser notice:', err));
   }
 }
 
@@ -130,18 +138,25 @@ function handleIncomingLiveMessage(fromUserId, messageData) {
   );
 
   if (!existing) {
+    // Ensure peer user info is populated in USERS
+    if (!USERS[fromUserId]) {
+      const stored = getStoredUsers();
+      if (stored[fromUserId]) USERS[fromUserId] = stored[fromUserId];
+    }
+
+    const isActivelyChattingWithSender = (state.activeDM === fromUserId && state.view === 'messages');
     const formattedMsg = {
       from: fromUserId,
       to: currentId,
       text: messageData.text || messageData.content || '',
       time: messageData.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       timestamp: messageData.timestamp || Date.now(),
-      read: state.activeDM === fromUserId
+      read: isActivelyChattingWithSender
     };
     state.dmMessages[fromUserId].push(formattedMsg);
     saveDMs(state.dmMessages);
 
-    if (state.activeDM === fromUserId) {
+    if (isActivelyChattingWithSender) {
       const bubble = createChatBubble(formattedMsg);
       const chatMsgContainer = document.getElementById('chat-messages');
       if (chatMsgContainer) {
@@ -553,6 +568,8 @@ function checkAuthSession() {
     state.currentUser = USERS[currentUserId];
     if (authScreen) authScreen.style.display = 'none';
     syncUserUI();
+    registerSignalRUser();
+    reloadUserScopedData();
 
     // Listen for incoming calls & messages
     listenToIncomingCalls();
@@ -587,6 +604,8 @@ function loginUser(user) {
   });
 
   syncUserUI();
+  registerSignalRUser();
+  reloadUserScopedData();
   renderFeed();
   renderDMUserList();
   renderOnlineMembers();
@@ -1965,6 +1984,18 @@ function sendChatMessage() {
   if (!state.dmMessages[targetUser]) state.dmMessages[targetUser] = [];
   state.dmMessages[targetUser].push(msg);
   saveDMs(state.dmMessages);
+
+  // Multi-tab instant local sync for accounts on the same computer
+  try {
+    localStorage.setItem('nexus_live_dm_event', JSON.stringify({
+      from: currentId,
+      to: targetUser,
+      text: text,
+      time: time,
+      timestamp: timestamp,
+      _t: Date.now()
+    }));
+  } catch (e) { }
 
   chatInput.textContent = '';
   const bubble = createChatBubble(msg);
@@ -3390,6 +3421,18 @@ function init() {
 
   // Connect to .NET 8 SignalR Hub for real-time live messaging and calling
   initSignalR();
+
+  // Multi-tab instant local sync listener for accounts on the same computer
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'nexus_live_dm_event' && e.newValue) {
+      try {
+        const liveMsg = JSON.parse(e.newValue);
+        if (state.currentUser && liveMsg.to === state.currentUser.id && liveMsg.from !== state.currentUser.id) {
+          handleIncomingLiveMessage(liveMsg.from, liveMsg);
+        }
+      } catch (err) { }
+    }
+  });
 }
 
 // ─── Expose globals for inline handlers ──────────────────────
