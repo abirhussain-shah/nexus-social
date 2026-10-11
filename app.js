@@ -2083,7 +2083,15 @@ function createChatBubble(msg) {
 }
 
 function scrollChatToBottom() {
-  requestAnimationFrame(() => { chatMessages.scrollTop = chatMessages.scrollHeight; });
+  const container = document.getElementById('chat-messages');
+  if (container) {
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+    setTimeout(() => {
+      if (container) container.scrollTop = container.scrollHeight;
+    }, 40);
+  }
 }
 
 // ─── SEND DM ──────────────────────────────────────────────────
