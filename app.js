@@ -3374,6 +3374,7 @@ function init() {
   renderDMUserList();
   renderOnlineMembers();
   renderFriendsList();
+  renderNotifications();
 
   // Select first available real conversation if any exist, otherwise clear chat panel
   renderDMChat(null);
@@ -3426,6 +3427,9 @@ window.declineCurrentIncomingCall = declineCurrentIncomingCall;
 window.endActiveCall = endActiveCall;
 window.toggleCallMute = toggleCallMute;
 window.toggleCallVideo = toggleCallVideo;
+window.handleNotificationClick = handleNotificationClick;
+window.markAllNotificationsRead = markAllNotificationsRead;
+window.toggleNotifPanel = toggleNotifPanel;
 
 // ─── Boot ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);
