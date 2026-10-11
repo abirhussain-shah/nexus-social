@@ -39,10 +39,137 @@ function initFirebase() {
   }
 }
 
+// ─── .NET 8 SignalR Hub & Real-Time Backend Client ────────────
+let signalRConn = null;
+let isSignalRConnected = false;
+
+async function initSignalR() {
+  if (typeof signalR === 'undefined') {
+    console.info('SignalR library not available; running in cloud fallback mode.');
+    return;
+  }
+  if (window.location.protocol === 'file:') {
+    console.info('Running via local file protocol, SignalR skipped.');
+    return;
+  }
+
+  try {
+    signalRConn = new signalR.HubConnectionBuilder()
+      .withUrl('/hubs/nexus')
+      .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
+      .configureLogging(signalR.LogLevel.Warning)
+      .build();
+
+    // Live instant messaging
+    signalRConn.on('ReceiveLiveMessage', (fromUserId, messageData) => {
+      handleIncomingLiveMessage(fromUserId, messageData);
+    });
+
+    // Real-time member presence (online status)
+    signalRConn.on('UserPresenceChanged', (userId, isOnline) => {
+      handleUserPresenceChanged(userId, isOnline);
+    });
+
+    // WebRTC calling signaling
+    signalRConn.on('IncomingCallSignal', (callerId, callType, callPayload) => {
+      handleIncomingSignalRCall(callerId, callType, callPayload);
+    });
+
+    signalRConn.on('CallAcceptedSignal', (receiverId, answerPayload) => {
+      handleSignalRCallAccepted(receiverId, answerPayload);
+    });
+
+    signalRConn.on('CallDeclinedSignal', (receiverId) => {
+      handleSignalRCallDeclined(receiverId);
+    });
+
+    signalRConn.on('CallEndedSignal', (senderId) => {
+      handleSignalRCallEnded(senderId);
+    });
+
+    signalRConn.on('ReceiveIceCandidate', (fromUserId, candidatePayload) => {
+      handleSignalRIceCandidate(fromUserId, candidatePayload);
+    });
+
+    signalRConn.on('CallFailed', (toUserId, reason) => {
+      showToast(`⚠️ Call notice: ${reason}`);
+      cleanupCallUI();
+    });
+
+    signalRConn.onreconnected(() => {
+      if (state.currentUser) {
+        signalRConn.invoke('RegisterUser', state.currentUser.id).catch(() => {});
+      }
+    });
+
+    await signalRConn.start();
+    isSignalRConnected = true;
+    console.log('⚡ .NET 8 SignalR Hub connected successfully (/hubs/nexus)');
+
+    if (state.currentUser) {
+      signalRConn.invoke('RegisterUser', state.currentUser.id).catch(err => console.warn(err));
+    }
+  } catch (err) {
+    console.info('.NET 8 SignalR Hub notice (normal in static file mode):', err.message || err);
+    isSignalRConnected = false;
+  }
+}
+
+function handleIncomingLiveMessage(fromUserId, messageData) {
+  if (!fromUserId || !messageData) return;
+  const currentId = state.currentUser ? state.currentUser.id : null;
+  if (!currentId) return;
+
+  if (!state.dmMessages[fromUserId]) state.dmMessages[fromUserId] = [];
+  
+  // Deduplicate against local & cloud messages
+  const existing = state.dmMessages[fromUserId].some(m => 
+    (m.id && messageData.id && m.id === messageData.id) ||
+    (m.timestamp && messageData.timestamp && Math.abs(m.timestamp - messageData.timestamp) < 1500 && m.text === messageData.text)
+  );
+
+  if (!existing) {
+    const formattedMsg = {
+      from: fromUserId,
+      to: currentId,
+      text: messageData.text || messageData.content || '',
+      time: messageData.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: messageData.timestamp || Date.now(),
+      read: state.activeDM === fromUserId
+    };
+    state.dmMessages[fromUserId].push(formattedMsg);
+    saveDMs(state.dmMessages);
+
+    if (state.activeDM === fromUserId) {
+      const bubble = createChatBubble(formattedMsg);
+      const chatMsgContainer = document.getElementById('chat-messages');
+      if (chatMsgContainer) {
+        chatMsgContainer.appendChild(bubble);
+        scrollChatToBottom();
+      }
+    } else {
+      const senderName = USERS[fromUserId]?.name || 'Member';
+      showToast(`💬 ${senderName}: ${formattedMsg.text.slice(0, 32)}`);
+    }
+
+    renderDMUserList();
+  }
+}
+
+function handleUserPresenceChanged(userId, isOnline) {
+  if (!userId || !USERS[userId]) return;
+  renderOnlineMembers();
+  if (state.activeDM === userId) {
+    const statusEl = document.getElementById('chat-peer-status');
+    if (statusEl) statusEl.textContent = isOnline ? 'Active now' : 'Offline';
+  }
+}
+
 // ─── Storage Keys ─────────────────────────────────────────────
 const STORAGE = {
   USERS: 'nexus_users_db',
   SESSION: 'nexus_current_session',
+  LAST_ACTIVE: 'nexus_last_active',
   POSTS: 'nexus_posts_db',
   DMS: 'nexus_dms_db',
   SAVED: 'nexus_saved_db',
@@ -50,6 +177,8 @@ const STORAGE = {
   DM_SETTINGS: 'nexus_dm_settings',
   FOLLOWING: 'nexus_following_db'
 };
+
+const SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes inactivity timeout
 
 // Dummy users blacklist — permanently prevented from showing
 const DUMMY_IDS = new Set(['sarah', 'maya', 'leo', 'liam', 'zoe', 'alex', 'you', 'demo_user']);
@@ -68,7 +197,7 @@ function isDummyUser(u, id) {
 
 function purgeLegacyDummyData() {
   ['nexus_users', 'nexus_posts', 'nexus_dms', 'nexus_messages'].forEach(k => {
-    try { localStorage.removeItem(k); } catch (e) {}
+    try { localStorage.removeItem(k); } catch (e) { }
   });
 
   try {
@@ -84,7 +213,7 @@ function purgeLegacyDummyData() {
       }
       if (changed) localStorage.setItem(STORAGE.USERS, JSON.stringify(parsed));
     }
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     const rawDms = localStorage.getItem(STORAGE.DMS);
@@ -99,7 +228,7 @@ function purgeLegacyDummyData() {
       }
       if (changed) localStorage.setItem(STORAGE.DMS, JSON.stringify(parsed));
     }
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     const rawPosts = localStorage.getItem(STORAGE.POSTS);
@@ -110,7 +239,7 @@ function purgeLegacyDummyData() {
         localStorage.setItem(STORAGE.POSTS, JSON.stringify(filtered));
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 
   for (const k of Object.keys(USERS)) {
     if (isDummyUser(USERS[k], k)) delete USERS[k];
@@ -159,14 +288,14 @@ function getStoredUsers() {
       }
       return clean;
     }
-  } catch (e) {}
+  } catch (e) { }
   return {};
 }
 
 function saveStoredUsers(users) {
   try {
     localStorage.setItem(STORAGE.USERS, JSON.stringify(users));
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function loadPosts() {
@@ -176,14 +305,14 @@ function loadPosts() {
       const posts = JSON.parse(saved);
       return posts.filter(p => !DUMMY_IDS.has(p.user) && !DUMMY_NAMES.has(p.author));
     }
-  } catch (e) {}
+  } catch (e) { }
   return [];
 }
 
 function savePosts(posts) {
   try {
     localStorage.setItem(STORAGE.POSTS, JSON.stringify(posts));
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function loadDMs() {
@@ -199,35 +328,35 @@ function loadDMs() {
       }
       return clean;
     }
-  } catch (e) {}
+  } catch (e) { }
   return {};
 }
 
 function saveDMs(dms) {
   try {
     localStorage.setItem(STORAGE.DMS, JSON.stringify(dms));
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function loadDMSettings() {
   try {
     const saved = localStorage.getItem(STORAGE.DM_SETTINGS);
     if (saved) return JSON.parse(saved);
-  } catch (e) {}
+  } catch (e) { }
   return {};
 }
 
 function saveDMSettings() {
   try {
     localStorage.setItem(STORAGE.DM_SETTINGS, JSON.stringify(state.dmSettings));
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function loadSavedPosts() {
   try {
     const saved = localStorage.getItem(STORAGE.SAVED);
     if (saved) return JSON.parse(saved);
-  } catch (e) {}
+  } catch (e) { }
   return [];
 }
 
@@ -235,35 +364,110 @@ function loadFollowing() {
   try {
     const saved = localStorage.getItem(STORAGE.FOLLOWING);
     if (saved) return JSON.parse(saved);
-  } catch (e) {}
+  } catch (e) { }
   return [];
 }
 
 function saveFollowing(following) {
   try {
     localStorage.setItem(STORAGE.FOLLOWING, JSON.stringify(following));
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function saveSavedPosts(savedIds) {
   try {
     localStorage.setItem(STORAGE.SAVED, JSON.stringify(savedIds));
-  } catch (e) {}
+  } catch (e) { }
 }
 
 // ─── DOM Refs ─────────────────────────────────────────────────
-const postsFeed      = document.getElementById('posts-feed');
-const profilePosts   = document.getElementById('profile-posts');
-const chatMessages   = document.getElementById('chat-messages');
-const chatInput      = document.getElementById('chat-input');
-const chatSendBtn    = document.getElementById('chat-send-btn');
+const postsFeed = document.getElementById('posts-feed');
+const profilePosts = document.getElementById('profile-posts');
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const chatSendBtn = document.getElementById('chat-send-btn');
 const toastContainer = document.getElementById('toast-container');
-const notifPanel     = document.getElementById('notif-panel');
+const notifPanel = document.getElementById('notif-panel');
 const createPostOverlay = document.getElementById('create-post-overlay');
-const statPosts      = document.getElementById('stat-posts');
+const statPosts = document.getElementById('stat-posts');
 const savedPostsFeed = document.getElementById('saved-posts-feed');
 
-// ─── Authentication Core ──────────────────────────────────────
+// ─── Authentication & Session Management ──────────────────────
+let _lastActivityRecordTime = 0;
+function recordUserActivity() {
+  if (!state.currentUser) return;
+  const now = Date.now();
+  // Throttle updates to once every 10 seconds to avoid storage thrashing
+  if (now - _lastActivityRecordTime > 10000) {
+    _lastActivityRecordTime = now;
+    try {
+      localStorage.setItem(STORAGE.LAST_ACTIVE, now.toString());
+    } catch (e) { }
+
+    // Ping .NET 8 backend session endpoint
+    if (window.location.protocol !== 'file:') {
+      fetch('/api/session/ping', { method: 'POST' }).catch(() => {});
+    }
+  }
+}
+
+function checkSessionTimeout() {
+  const sessionUserId = localStorage.getItem(STORAGE.SESSION);
+  if (!sessionUserId) return false;
+
+  const lastActiveStr = localStorage.getItem(STORAGE.LAST_ACTIVE);
+  if (!lastActiveStr) {
+    try { localStorage.setItem(STORAGE.LAST_ACTIVE, Date.now().toString()); } catch (e) { }
+    return false;
+  }
+
+  const lastActive = parseInt(lastActiveStr, 10);
+  const now = Date.now();
+  if (now - lastActive > SESSION_TIMEOUT_MS) {
+    triggerSessionExpired('Your session expired after 15 minutes of inactivity. Please sign in again.');
+    return true;
+  }
+  return false;
+}
+
+function triggerSessionExpired(reason = 'Your session expired after 15 minutes of inactivity. Please sign in again.') {
+  if (typeof endActiveCall === 'function') {
+    try { endActiveCall(); } catch (e) { }
+  }
+
+  const prevUser = state.currentUser;
+  const prevEmail = prevUser ? prevUser.email : '';
+
+  try {
+    localStorage.removeItem(STORAGE.SESSION);
+    localStorage.removeItem(STORAGE.LAST_ACTIVE);
+  } catch (e) { }
+  state.currentUser = null;
+
+  switchView('feed');
+
+  const authScreen = document.getElementById('auth-screen');
+  if (authScreen) {
+    authScreen.style.display = 'flex';
+    authScreen.style.opacity = '1';
+    switchAuthPanel('login');
+  }
+
+  const noticeEl = document.getElementById('auth-session-notice');
+  const noticeText = document.getElementById('auth-session-notice-text');
+  if (noticeEl) {
+    if (noticeText) noticeText.textContent = reason;
+    noticeEl.style.display = 'flex';
+  }
+
+  const loginEmail = document.getElementById('login-email');
+  if (loginEmail && prevEmail) loginEmail.value = prevEmail;
+  const loginPass = document.getElementById('login-password');
+  if (loginPass) loginPass.value = '';
+
+  showToast('🔒 Session expired after 15 minutes of inactivity.');
+}
+
 function checkAuthSession() {
   const storedUsers = getStoredUsers();
   // Hydrate USERS registry with only real registered users
@@ -273,9 +477,21 @@ function checkAuthSession() {
   const authScreen = document.getElementById('auth-screen');
 
   if (currentUserId && USERS[currentUserId]) {
+    // Check 15-minute session timeout when returning to website
+    const lastActiveStr = localStorage.getItem(STORAGE.LAST_ACTIVE);
+    if (lastActiveStr && Date.now() - parseInt(lastActiveStr, 10) > SESSION_TIMEOUT_MS) {
+      triggerSessionExpired('Your session expired after 15 minutes of inactivity. Please sign in again.');
+      return;
+    }
+
+    // Refresh last active timestamp
+    try { localStorage.setItem(STORAGE.LAST_ACTIVE, Date.now().toString()); } catch (e) { }
     state.currentUser = USERS[currentUserId];
     if (authScreen) authScreen.style.display = 'none';
     syncUserUI();
+
+    // Listen for incoming calls & messages
+    listenToIncomingCalls();
   } else {
     state.currentUser = null;
     if (authScreen) {
@@ -288,7 +504,27 @@ function checkAuthSession() {
 function loginUser(user) {
   state.currentUser = user;
   USERS[user.id] = user;
-  localStorage.setItem(STORAGE.SESSION, user.id);
+  try {
+    localStorage.setItem(STORAGE.SESSION, user.id);
+    localStorage.setItem(STORAGE.LAST_ACTIVE, Date.now().toString());
+  } catch (e) { }
+
+  // Sync session with .NET 8 ASP.NET Core backend
+  if (window.location.protocol !== 'file:') {
+    fetch('/api/session/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: user.id })
+    }).catch(() => {});
+  }
+
+  // Register user connection on SignalR hub for instant messaging & call reception
+  if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected) {
+    signalRConn.invoke('RegisterUser', user.id).catch(err => console.warn(err));
+  }
+
+  const noticeEl = document.getElementById('auth-session-notice');
+  if (noticeEl) noticeEl.style.display = 'none';
 
   const authScreen = document.getElementById('auth-screen');
   if (authScreen) {
@@ -312,8 +548,12 @@ function loginUser(user) {
   renderOnlineMembers();
   renderFriendsList();
 
+  // Listen for real-time cloud data for this user
+  listenToIncomingCalls();
+  listenToCloudMessages();
+
   // Open chat with first available user if any exist
-  const others = Object.keys(USERS).filter(u => u !== user.id);
+  const others = Object.keys(USERS).filter(u => u !== user.id && !DUMMY_IDS.has(u.toLowerCase()) && !isDummyUser(USERS[u], u));
   if (others.length) {
     state.activeDM = others[0];
     renderDMChat(others[0]);
@@ -536,10 +776,24 @@ function handleForgotPassword() {
 }
 
 function logout() {
-  localStorage.removeItem(STORAGE.SESSION);
+  if (typeof endActiveCall === 'function') {
+    try { endActiveCall(); } catch (e) { }
+  }
+
+  if (window.location.protocol !== 'file:') {
+    fetch('/api/session/logout', { method: 'POST' }).catch(() => {});
+  }
+
+  try {
+    localStorage.removeItem(STORAGE.SESSION);
+    localStorage.removeItem(STORAGE.LAST_ACTIVE);
+  } catch (e) { }
   state.currentUser = null;
 
   switchView('feed');
+
+  const noticeEl = document.getElementById('auth-session-notice');
+  if (noticeEl) noticeEl.style.display = 'none';
 
   const authScreen = document.getElementById('auth-screen');
   if (authScreen) {
@@ -711,7 +965,7 @@ function createPostCard(post) {
   bodyContent = `
     <div class="post-body">
       ${post.title ? `<div class="post-title">${esc(post.title)}</div>` : ''}
-      <div class="post-text ${isLong ? 'collapsed' : ''}" id="pt-${post.id}">${esc(post.text).replace(/\n/g,'<br>')}</div>
+      <div class="post-text ${isLong ? 'collapsed' : ''}" id="pt-${post.id}">${esc(post.text).replace(/\n/g, '<br>')}</div>
       ${isLong ? `<button class="read-more-btn" onclick="toggleReadMore('${post.id}')">See more</button>` : ''}
       ${(post.tags || []).length ? `<div class="post-tags">${post.tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('')}</div>` : ''}
     </div>`;
@@ -976,7 +1230,20 @@ function listenToCloudPosts() {
       if (snapshot.empty) return;
       const cloudPosts = [];
       snapshot.forEach(doc => {
-        cloudPosts.push({ id: doc.id, ...doc.data() });
+        const d = doc.data();
+        const me = state.currentUser ? state.currentUser.id : 'you';
+        const likedBy = d.likedBy || [];
+        const local = state.posts.find(p => p.id === doc.id);
+        cloudPosts.push({
+          ...d,
+          id: doc.id,
+          likedBy,
+          likes: likedBy.length,
+          likedByMe: likedBy.includes(me),
+          comments: d.comments || [],
+          shares: d.shares || 0,
+          showComments: local ? !!local.showComments : false
+        });
       });
       if (cloudPosts.length > 0) {
         const cloudIds = new Set(cloudPosts.map(p => p.id));
@@ -994,17 +1261,23 @@ function listenToCloudPosts() {
   }
 }
 
+let _cloudMessagesUnsub = null;
 function listenToCloudMessages() {
   if (!db) return;
+  if (_cloudMessagesUnsub) {
+    try { _cloudMessagesUnsub(); } catch (e) { }
+  }
+
   try {
-    db.collection('messages').orderBy('timestamp', 'asc').limitToLast(100).onSnapshot(snapshot => {
+    _cloudMessagesUnsub = db.collection('messages').orderBy('timestamp', 'asc').limitToLast(200).onSnapshot(snapshot => {
       if (snapshot.empty) return;
       let hasUpdateForActive = false;
+      const currentId = state.currentUser ? state.currentUser.id : null;
+      if (!currentId) return;
 
       snapshot.forEach(doc => {
         const msg = doc.data();
         if (!msg || !msg.from || !msg.to) return;
-        const currentId = state.currentUser ? state.currentUser.id : 'you';
 
         if (msg.from === currentId) {
           const peer = msg.to;
@@ -1015,12 +1288,31 @@ function listenToCloudMessages() {
           }
         } else if (msg.to === currentId) {
           const peer = msg.from;
+          // Dynamically fetch and register peer if not yet loaded in USERS
+          if (!USERS[peer]) {
+            db.collection('users').doc(peer).get().then(uDoc => {
+              if (uDoc.exists) {
+                USERS[peer] = uDoc.data();
+                saveStoredUsers(USERS);
+                renderDMUserList();
+                renderFriendsList();
+                renderOnlineMembers();
+              }
+            }).catch(e => console.warn(e));
+          }
+
+          if (state.dmSettings[peer] && state.dmSettings[peer].deleted) {
+            state.dmSettings[peer].deleted = false;
+            saveDMSettings();
+          }
           if (!state.dmMessages[peer]) state.dmMessages[peer] = [];
           if (!state.dmMessages[peer].some(m => m.id === doc.id || (m.timestamp && m.timestamp === msg.timestamp))) {
             state.dmMessages[peer].push({ ...msg, id: doc.id });
             if (peer === state.activeDM) {
               hasUpdateForActive = true;
             } else {
+              state.dmSettings[peer] = { ...(state.dmSettings[peer] || {}), unread: true };
+              saveDMSettings();
               showToast(`💬 New message from ${USERS[peer]?.name || 'a member'}`);
             }
           }
@@ -1029,7 +1321,7 @@ function listenToCloudMessages() {
 
       saveDMs(state.dmMessages);
       renderDMUserList();
-      if (hasUpdateForActive && state.view === 'messages') {
+      if (hasUpdateForActive && state.view === 'messages' && state.activeDM) {
         renderDMChat(state.activeDM);
       }
     }, err => {
@@ -1140,8 +1432,8 @@ function openDMMenu(event, userId) {
   menu.innerHTML = `
     <button class="dm-menu-item" onclick="toggleMuteConversation('${userId}')">
       ${isMuted
-        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg> Unmute'
-        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg> Mute'}
+      ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg> Unmute'
+      : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg> Mute'}
     </button>
     <button class="dm-menu-item" onclick="markConversationUnread('${userId}')">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
@@ -1388,10 +1680,25 @@ function renderFriendsList() {
 }
 
 // ─── RENDER DM CHAT ───────────────────────────────────────────
+function closeMobileChat() {
+  document.body.classList.remove('mobile-chat-open');
+  state.activeDM = null;
+  document.querySelectorAll('.dm-item').forEach(el => el.classList.remove('active'));
+}
+
+function startChatWithUser(userId) {
+  if (!userId || !USERS[userId]) return;
+  switchView('messages');
+  renderDMChat(userId);
+  document.body.classList.add('mobile-chat-open');
+}
+
+// ─── RENDER DM CHAT ───────────────────────────────────────────
 function renderDMChat(userId) {
   const chatMsgContainer = document.getElementById('chat-messages');
   if (!userId || !USERS[userId]) {
     state.activeDM = null;
+    document.body.classList.remove('mobile-chat-open');
     if (chatMsgContainer) {
       chatMsgContainer.innerHTML = '<p style="color:var(--text-3);text-align:center;padding:40px 20px;">Select a conversation to start messaging 💬</p>';
     }
@@ -1407,6 +1714,8 @@ function renderDMChat(userId) {
   }
 
   state.activeDM = userId;
+  document.body.classList.add('mobile-chat-open');
+
   if (!state.dmMessages[userId]) state.dmMessages[userId] = [];
   const msgs = state.dmMessages[userId];
   if (chatMsgContainer) chatMsgContainer.innerHTML = '';
@@ -1480,7 +1789,7 @@ function createChatBubble(msg) {
   row.innerHTML = `
     ${!isOwn ? `<div class="chat-msg-bubble-avatar" style="background:${user.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)'}">${user.initials || 'U'}</div>` : ''}
     <div class="chat-msg-bubble">
-      ${esc(msg.text).replace(/\n/g,'<br>')}
+      ${esc(msg.text).replace(/\n/g, '<br>')}
       <div class="bubble-footer">
         <span class="bubble-time">${msg.time}</span>
         ${ticks}
@@ -1518,7 +1827,20 @@ function sendChatMessage() {
 
   renderDMUserList();
 
-  // Sync to Firebase Cloud
+  // Instant live texting via .NET 8 SignalR Hub
+  if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected) {
+    signalRConn.invoke('SendLiveMessage', targetUser, {
+      from: currentId,
+      to: targetUser,
+      text: text,
+      time: time,
+      timestamp: timestamp
+    }).catch(err => {
+      console.warn('SignalR SendLiveMessage notice:', err);
+    });
+  }
+
+  // Persistent sync to Firebase Cloud
   if (db) {
     db.collection('messages').add({
       from: currentId,
@@ -1548,6 +1870,13 @@ function toggleLike(postId) {
   post.likedByMe = !post.likedByMe;
   post.likes += post.likedByMe ? 1 : -1;
   savePosts(state.posts);
+  if (db) {
+    const me = state.currentUser ? state.currentUser.id : 'you';
+    const FV = firebase.firestore.FieldValue;
+    db.collection('posts').doc(postId).update({
+      likedBy: post.likedByMe ? FV.arrayUnion(me) : FV.arrayRemove(me)
+    }).catch(err => console.warn('Like sync warning:', err));
+  }
   refreshPost(postId);
   showToast(post.likedByMe ? '❤️ You liked this post!' : '💔 Unliked');
 }
@@ -1568,8 +1897,14 @@ function addComment(postId) {
   if (!text) return;
 
   const currentId = state.currentUser ? state.currentUser.id : 'you';
-  post.comments.push({ user: currentId, text, time: 'Just now' });
+  const comment = { user: currentId, text, time: 'Just now', timestamp: Date.now() };
+  post.comments.push(comment);
   savePosts(state.posts);
+  if (db) {
+    db.collection('posts').doc(postId).update({
+      comments: firebase.firestore.FieldValue.arrayUnion(comment)
+    }).catch(err => console.warn('Comment sync warning:', err));
+  }
   refreshPost(postId);
   showToast('💬 Comment posted!');
 }
@@ -1579,6 +1914,11 @@ function sharePost(postId) {
   if (post) {
     post.shares = (post.shares || 0) + 1;
     savePosts(state.posts);
+    if (db) {
+      db.collection('posts').doc(postId).update({
+        shares: firebase.firestore.FieldValue.increment(1)
+      }).catch(err => console.warn('Share sync warning:', err));
+    }
     refreshPost(postId);
   }
   showToast('📤 Post shared with your followers!');
@@ -1695,7 +2035,7 @@ function submitPost() {
 
   // Close modal & reset
   createPostOverlay.style.display = 'none';
-  ['post-text-input','photo-caption-input'].forEach(id => {
+  ['post-text-input', 'photo-caption-input'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.textContent = '';
   });
@@ -1758,7 +2098,7 @@ function toggleNotifPanel() {
 // ─── HELPERS ─────────────────────────────────────────────────
 function esc(str) {
   if (!str) return '';
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ─── EVENT LISTENERS ──────────────────────────────────────────
@@ -1856,7 +2196,7 @@ function attachEventListeners() {
   }
 
   // Forward legacy toggleFollow if called
-  window.toggleFollow = function(btn) {
+  window.toggleFollow = function (btn) {
     const uid = btn.dataset?.user;
     if (uid) toggleFollowUser(uid, btn);
   };
@@ -1956,11 +2296,704 @@ function attachEventListeners() {
       });
     }
   });
+
+  // User activity listeners for 15-minute session timeout
+  ['click', 'keydown', 'scroll', 'touchstart', 'mousemove'].forEach(evt => {
+    window.addEventListener(evt, recordUserActivity, { passive: true });
+  });
+
+  // Tab visibility changes (leaving tab / returning to website)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      recordUserActivity();
+    } else if (document.visibilityState === 'visible') {
+      checkSessionTimeout();
+    }
+  });
+
+  // Background inactivity check every 10 seconds
+  setInterval(checkSessionTimeout, 10000);
+}
+
+// ─── LIVE AUDIO & VIDEO CALLING ENGINE ────────────────────────
+const callState = {
+  callId: null,
+  peerId: null,
+  callType: 'voice', // 'voice' | 'video'
+  role: null, // 'caller' | 'receiver'
+  status: 'idle', // 'idle' | 'ringing' | 'connected'
+  localStream: null,
+  remoteStream: null,
+  peerConnection: null,
+  timerInterval: null,
+  seconds: 0,
+  isMuted: false,
+  isVideoMuted: false,
+  unsubscribeCall: null,
+  audioContext: null,
+  ringOscillators: []
+};
+
+const rtcConfig = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' }
+  ]
+};
+
+// Web Audio Ringtone Generator (Clean synthesizer, 100% reliable)
+function playTone(freq, type = 'sine', duration = 0.4, delay = 0) {
+  try {
+    if (!callState.audioContext) {
+      callState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const ctx = callState.audioContext;
+    if (ctx.state === 'suspended') ctx.resume();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
+    gain.gain.setValueAtTime(0.08, ctx.currentTime + delay);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime + delay);
+    osc.stop(ctx.currentTime + delay + duration);
+    callState.ringOscillators.push(osc);
+  } catch (e) { }
+}
+
+let ringLoopTimer = null;
+function startRingtone(isIncoming = false) {
+  stopRingtone();
+  function trigger() {
+    if (isIncoming) {
+      playTone(523.25, 'triangle', 0.25, 0);
+      playTone(659.25, 'triangle', 0.25, 0.15);
+      playTone(783.99, 'triangle', 0.35, 0.3);
+    } else {
+      playTone(440, 'sine', 0.8, 0);
+      playTone(480, 'sine', 0.8, 0);
+    }
+  }
+  trigger();
+  ringLoopTimer = setInterval(trigger, isIncoming ? 2200 : 3200);
+}
+
+function stopRingtone() {
+  if (ringLoopTimer) {
+    clearInterval(ringLoopTimer);
+    ringLoopTimer = null;
+  }
+  callState.ringOscillators.forEach(osc => {
+    try { osc.stop(); } catch (e) { }
+  });
+  callState.ringOscillators = [];
+}
+
+function startVoiceCall() {
+  if (!state.activeDM || !USERS[state.activeDM]) {
+    showToast('⚠️ Please select a member to call');
+    return;
+  }
+  startCall(state.activeDM, 'voice');
+}
+
+function startVideoCall() {
+  if (!state.activeDM || !USERS[state.activeDM]) {
+    showToast('⚠️ Please select a member to call');
+    return;
+  }
+  startCall(state.activeDM, 'video');
+}
+
+async function startCall(peerId, type = 'voice') {
+  if (!state.currentUser) {
+    showToast('⚠️ Please sign in to make calls');
+    return;
+  }
+  if (peerId === state.currentUser.id) {
+    showToast('⚠️ You cannot call yourself');
+    return;
+  }
+  if (!db && !isSignalRConnected) {
+    showToast('⚠️ Connecting to real-time server, please try again in a moment');
+    return;
+  }
+
+  const peer = USERS[peerId];
+  if (!peer) {
+    showToast('⚠️ Member not found');
+    return;
+  }
+
+  callState.callType = type;
+  callState.peerId = peerId;
+  callState.role = 'caller';
+  callState.status = 'ringing';
+  callState.seconds = 0;
+
+  // Show Outgoing Modal
+  const overlay = document.getElementById('call-overlay');
+  const outgoingModal = document.getElementById('outgoing-call-modal');
+  const incomingModal = document.getElementById('incoming-call-modal');
+  const activeModal = document.getElementById('active-call-modal');
+
+  if (overlay) overlay.style.display = 'flex';
+  if (outgoingModal) outgoingModal.style.display = 'flex';
+  if (incomingModal) incomingModal.style.display = 'none';
+  if (activeModal) activeModal.style.display = 'none';
+
+  const avatarEl = document.getElementById('outgoing-call-avatar');
+  if (avatarEl) {
+    avatarEl.style.background = peer.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)';
+    avatarEl.textContent = peer.initials || peer.name?.slice(0, 2).toUpperCase() || 'U';
+  }
+  const nameEl = document.getElementById('outgoing-call-name');
+  if (nameEl) nameEl.textContent = peer.name;
+  const statusEl = document.getElementById('outgoing-call-status');
+  if (statusEl) statusEl.textContent = 'Calling…';
+  const typeEl = document.getElementById('outgoing-call-type');
+  if (typeEl) typeEl.textContent = type === 'video' ? '📹 Video Call' : '📞 Voice Call';
+
+  startRingtone(false);
+
+  // Acquire media stream (with graceful fallback if permission is blocked)
+  try {
+    callState.localStream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: type === 'video' ? { width: { ideal: 640 }, height: { ideal: 480 } } : false
+    });
+  } catch (err) {
+    console.warn('Microphone/Camera permission blocked or not available (using audio fallback):', err);
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const dest = ctx.createMediaStreamDestination();
+      callState.localStream = dest.stream;
+    } catch (e) { }
+  }
+
+  const localVideoEl = document.getElementById('local-video-el');
+  if (localVideoEl && callState.localStream && type === 'video') {
+    localVideoEl.srcObject = callState.localStream;
+  }
+
+  // Setup WebRTC PeerConnection
+  let pc;
+  try {
+    pc = new RTCPeerConnection(rtcConfig);
+    callState.peerConnection = pc;
+
+    callState.remoteStream = new MediaStream();
+    const remoteVideoEl = document.getElementById('remote-video-el');
+    if (remoteVideoEl) remoteVideoEl.srcObject = callState.remoteStream;
+
+    if (callState.localStream) {
+      callState.localStream.getTracks().forEach(track => pc.addTrack(track, callState.localStream));
+    }
+
+    pc.ontrack = event => {
+      event.streams[0].getTracks().forEach(track => {
+        callState.remoteStream.addTrack(track);
+      });
+    };
+  } catch (pcErr) {
+    console.warn('Peer connection creation warning:', pcErr);
+  }
+
+  // Firestore & SignalR Call initialization
+  let callDoc = null;
+  if (db) {
+    callDoc = db.collection('calls').doc();
+    callState.callId = callDoc.id;
+  } else {
+    callState.callId = 'sigr_' + Date.now();
+  }
+
+  if (pc) {
+    const callerCandidatesCol = callDoc ? callDoc.collection('callerCandidates') : null;
+    pc.onicecandidate = event => {
+      if (event.candidate) {
+        if (callerCandidatesCol) {
+          callerCandidatesCol.add(event.candidate.toJSON()).catch(e => console.warn(e));
+        }
+        if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected) {
+          signalRConn.invoke('SendIceCandidate', peerId, { candidate: event.candidate.toJSON() }).catch(e => console.warn(e));
+        }
+      }
+    };
+  }
+
+  let offerData = null;
+  if (pc) {
+    try {
+      const offerDesc = await pc.createOffer();
+      await pc.setLocalDescription(offerDesc);
+      offerData = { sdp: offerDesc.sdp, type: offerDesc.type };
+    } catch (offerErr) {
+      console.warn('Offer creation warning:', offerErr);
+    }
+  }
+
+  const callData = {
+    caller: state.currentUser.id,
+    callerName: state.currentUser.name,
+    callerAvatar: state.currentUser.initials || 'U',
+    callerGradient: state.currentUser.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)',
+    receiver: peerId,
+    receiverName: peer.name,
+    type: type,
+    status: 'ringing',
+    offer: offerData,
+    createdAt: Date.now()
+  };
+
+  // 1. Signal through .NET 8 SignalR Hub
+  if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected) {
+    signalRConn.invoke('StartCall', peerId, type, callData).catch(err => {
+      console.warn('SignalR StartCall notice:', err);
+    });
+  }
+
+  // 2. Cloud fallback through Firestore
+  if (callDoc) {
+    await callDoc.set(callData);
+
+    callState.unsubscribeCall = callDoc.onSnapshot(async snapshot => {
+      const data = snapshot.data();
+      if (!data) return;
+
+      if (data.status === 'accepted' && callState.status === 'ringing') {
+        stopRingtone();
+        if (pc && !pc.currentRemoteDescription && data.answer) {
+          try {
+            const answerDesc = new RTCSessionDescription(data.answer);
+            await pc.setRemoteDescription(answerDesc);
+
+            callDoc.collection('receiverCandidates').onSnapshot(candSnap => {
+              candSnap.docChanges().forEach(change => {
+                if (change.type === 'added') {
+                  const cand = new RTCIceCandidate(change.doc.data());
+                  pc.addIceCandidate(cand).catch(e => console.warn(e));
+                }
+              });
+            });
+          } catch (ansErr) {
+            console.warn('Answer setting warning:', ansErr);
+          }
+        }
+
+        showActiveCallUI(peer, type);
+      } else if (data.status === 'declined') {
+        stopRingtone();
+        showToast(`📞 ${peer.name} declined the call`);
+        cleanupCallUI();
+      } else if (data.status === 'ended') {
+        stopRingtone();
+        showToast('📞 Call ended');
+        cleanupCallUI();
+      }
+    });
+  }
+}
+
+// ─── SignalR Real-Time Call Event Handlers ────────────────────
+function handleIncomingSignalRCall(callerId, callType, callPayload) {
+  if (callState.status !== 'idle') return;
+  const callerUser = USERS[callerId] || {
+    name: callPayload?.callerName || 'Member',
+    initials: callPayload?.callerAvatar || 'U',
+    gradient: callPayload?.callerGradient || 'linear-gradient(135deg,#6366f1,#8b5cf6)'
+  };
+
+  callState.incomingData = {
+    caller: callerId,
+    callerName: callerUser.name,
+    callerAvatar: callerUser.initials,
+    callerGradient: callerUser.gradient,
+    type: callType,
+    offer: callPayload?.offer
+  };
+
+  showIncomingCallModal('sigr_' + Date.now(), callState.incomingData);
+}
+
+function handleSignalRCallAccepted(receiverId, answerPayload) {
+  if (callState.role !== 'caller' || callState.status !== 'ringing') return;
+  stopRingtone();
+
+  if (callState.peerConnection && answerPayload && answerPayload.answer) {
+    try {
+      const desc = new RTCSessionDescription(answerPayload.answer);
+      callState.peerConnection.setRemoteDescription(desc).catch(e => console.warn(e));
+    } catch (e) {
+      console.warn('Set answer remote desc error:', e);
+    }
+  }
+
+  const peer = USERS[receiverId] || { name: 'Member' };
+  showActiveCallUI(peer, callState.callType);
+}
+
+function handleSignalRCallDeclined(receiverId) {
+  stopRingtone();
+  const peer = USERS[receiverId] || { name: 'Member' };
+  showToast(`📞 ${peer.name} declined the call`);
+  cleanupCallUI();
+}
+
+function handleSignalRCallEnded(senderId) {
+  stopRingtone();
+  showToast('📞 Call ended');
+  cleanupCallUI();
+}
+
+function handleSignalRIceCandidate(fromUserId, candidatePayload) {
+  if (callState.peerConnection && candidatePayload && candidatePayload.candidate) {
+    try {
+      const cand = new RTCIceCandidate(candidatePayload.candidate);
+      callState.peerConnection.addIceCandidate(cand).catch(e => console.warn(e));
+    } catch (e) {
+      console.warn('Add ice candidate error:', e);
+    }
+  }
+}
+
+let _incomingCallUnsub = null;
+function listenToIncomingCalls() {
+  if (!db || !state.currentUser) return;
+  if (_incomingCallUnsub) {
+    try { _incomingCallUnsub(); } catch (e) { }
+  }
+
+  const myId = state.currentUser.id;
+  try {
+    _incomingCallUnsub = db.collection('calls')
+      .where('receiver', '==', myId)
+      .where('status', '==', 'ringing')
+      .onSnapshot(snapshot => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            const callId = change.doc.id;
+            // Ignore calls older than 50 seconds
+            if (Date.now() - (data.createdAt || 0) < 50000 && callState.status === 'idle') {
+              showIncomingCallModal(callId, data);
+            }
+          }
+        });
+      }, err => console.warn('Incoming calls subscription:', err));
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+function showIncomingCallModal(callId, data) {
+  callState.callId = callId;
+  callState.peerId = data.caller;
+  callState.callType = data.type || 'voice';
+  callState.role = 'receiver';
+  callState.status = 'ringing';
+  callState.incomingData = data;
+
+  const overlay = document.getElementById('call-overlay');
+  const outgoingModal = document.getElementById('outgoing-call-modal');
+  const incomingModal = document.getElementById('incoming-call-modal');
+  const activeModal = document.getElementById('active-call-modal');
+
+  if (overlay) overlay.style.display = 'flex';
+  if (outgoingModal) outgoingModal.style.display = 'none';
+  if (incomingModal) incomingModal.style.display = 'flex';
+  if (activeModal) activeModal.style.display = 'none';
+
+  const avatarEl = document.getElementById('incoming-call-avatar');
+  if (avatarEl) {
+    avatarEl.style.background = data.callerGradient || 'linear-gradient(135deg,#6366f1,#8b5cf6)';
+    avatarEl.textContent = data.callerAvatar || 'U';
+  }
+  const nameEl = document.getElementById('incoming-call-name');
+  if (nameEl) nameEl.textContent = data.callerName || 'Member';
+  const typeEl = document.getElementById('incoming-call-type');
+  if (typeEl) typeEl.textContent = data.type === 'video' ? '📹 Incoming Video Call' : '📞 Incoming Voice Call';
+
+  startRingtone(true);
+
+  if (db && !callId.startsWith('sigr_')) {
+    callState.unsubscribeCall = db.collection('calls').doc(callId).onSnapshot(snap => {
+      const d = snap.data();
+      if (d && (d.status === 'ended' || d.status === 'declined') && callState.status === 'ringing') {
+        stopRingtone();
+        showToast('📞 Call ended by caller');
+        cleanupCallUI();
+      }
+    });
+  }
+}
+
+async function acceptCurrentIncomingCall() {
+  stopRingtone();
+  if (!callState.callId) return;
+
+  const peerId = callState.peerId;
+  const caller = USERS[peerId] || (callState.incomingData ? {
+    name: callState.incomingData.callerName,
+    initials: callState.incomingData.callerAvatar,
+    gradient: callState.incomingData.callerGradient
+  } : { name: 'Member', initials: 'U' });
+
+  const callType = callState.callType || 'voice';
+
+  let pc;
+  let answerData = null;
+  try {
+    pc = new RTCPeerConnection(rtcConfig);
+    callState.peerConnection = pc;
+
+    callState.remoteStream = new MediaStream();
+    const remoteVideoEl = document.getElementById('remote-video-el');
+    if (remoteVideoEl) remoteVideoEl.srcObject = callState.remoteStream;
+
+    try {
+      callState.localStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: callType === 'video' ? { width: { ideal: 640 }, height: { ideal: 480 } } : false
+      });
+    } catch (err) {
+      console.warn('Microphone/Camera fallback on accept:', err);
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const dest = ctx.createMediaStreamDestination();
+      callState.localStream = dest.stream;
+    }
+
+    const localVideoEl = document.getElementById('local-video-el');
+    if (localVideoEl && callState.localStream && callType === 'video') {
+      localVideoEl.srcObject = callState.localStream;
+    }
+
+    if (callState.localStream) {
+      callState.localStream.getTracks().forEach(track => pc.addTrack(track, callState.localStream));
+    }
+
+    pc.ontrack = event => {
+      event.streams[0].getTracks().forEach(track => {
+        callState.remoteStream.addTrack(track);
+      });
+    };
+
+    pc.onicecandidate = event => {
+      if (event.candidate) {
+        if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected) {
+          signalRConn.invoke('SendIceCandidate', peerId, { candidate: event.candidate.toJSON() }).catch(e => console.warn(e));
+        }
+        if (db && !callState.callId.startsWith('sigr_')) {
+          db.collection('calls').doc(callState.callId).collection('receiverCandidates').add(event.candidate.toJSON()).catch(e => console.warn(e));
+        }
+      }
+    };
+
+    const offerObj = callState.incomingData?.offer;
+    if (offerObj) {
+      await pc.setRemoteDescription(new RTCSessionDescription(offerObj));
+      const answerDesc = await pc.createAnswer();
+      await pc.setLocalDescription(answerDesc);
+      answerData = { sdp: answerDesc.sdp, type: answerDesc.type };
+    }
+  } catch (err) {
+    console.warn('Call accept setup warning:', err);
+  }
+
+  // Signal acceptance via SignalR
+  if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected) {
+    signalRConn.invoke('AcceptCall', peerId, { answer: answerData }).catch(e => console.warn(e));
+  }
+
+  // Update in Firestore
+  if (db && !callState.callId.startsWith('sigr_')) {
+    const callDoc = db.collection('calls').doc(callState.callId);
+    callDoc.update({
+      status: 'accepted',
+      answer: answerData
+    }).catch(e => console.warn(e));
+
+    callDoc.collection('callerCandidates').onSnapshot(candSnap => {
+      candSnap.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const cand = new RTCIceCandidate(change.doc.data());
+          if (pc) pc.addIceCandidate(cand).catch(e => console.warn(e));
+        }
+      });
+    });
+  }
+
+  showActiveCallUI(caller, callType);
+}
+
+function declineCurrentIncomingCall() {
+  stopRingtone();
+  if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected && callState.peerId) {
+    signalRConn.invoke('DeclineCall', callState.peerId).catch(e => console.warn(e));
+  }
+  if (callState.callId && db && !callState.callId.startsWith('sigr_')) {
+    db.collection('calls').doc(callState.callId).update({ status: 'declined' }).catch(e => console.warn(e));
+  }
+  cleanupCallUI();
+  showToast('📞 Call declined');
+}
+
+function cancelOutgoingCall() {
+  stopRingtone();
+  if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected && callState.peerId) {
+    signalRConn.invoke('EndCall', callState.peerId).catch(e => console.warn(e));
+  }
+  if (callState.callId && db && !callState.callId.startsWith('sigr_')) {
+    db.collection('calls').doc(callState.callId).update({ status: 'ended' }).catch(e => console.warn(e));
+  }
+  cleanupCallUI();
+  showToast('📞 Call cancelled');
+}
+
+function endActiveCall() {
+  stopRingtone();
+  const duration = formatCallTime(callState.seconds);
+  if (isSignalRConnected && signalRConn && signalRConn.state === signalR.HubConnectionState.Connected && callState.peerId) {
+    signalRConn.invoke('EndCall', callState.peerId).catch(e => console.warn(e));
+  }
+  if (callState.callId && db && !callState.callId.startsWith('sigr_')) {
+    db.collection('calls').doc(callState.callId).update({ status: 'ended' }).catch(e => console.warn(e));
+  }
+  cleanupCallUI();
+  showToast(`📞 Call ended · Duration ${duration}`);
+}
+
+function showActiveCallUI(peer, type) {
+  callState.status = 'connected';
+  callState.seconds = 0;
+
+  const overlay = document.getElementById('call-overlay');
+  const outgoingModal = document.getElementById('outgoing-call-modal');
+  const incomingModal = document.getElementById('incoming-call-modal');
+  const activeModal = document.getElementById('active-call-modal');
+
+  if (overlay) overlay.style.display = 'flex';
+  if (outgoingModal) outgoingModal.style.display = 'none';
+  if (incomingModal) incomingModal.style.display = 'none';
+  if (activeModal) activeModal.style.display = 'flex';
+
+  const peerNameEl = document.getElementById('active-call-peer-name');
+  if (peerNameEl) peerNameEl.textContent = peer.name || 'Member';
+  const avatarEl = document.getElementById('active-call-avatar');
+  if (avatarEl) {
+    avatarEl.style.background = peer.gradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)';
+    avatarEl.textContent = peer.initials || peer.name?.slice(0, 2).toUpperCase() || 'U';
+  }
+
+  const titleEl = document.getElementById('active-call-title');
+  if (titleEl) titleEl.textContent = type === 'video' ? 'Video Call' : 'Voice Call';
+
+  const remoteVideoEl = document.getElementById('remote-video-el');
+  const localPip = document.getElementById('local-video-pip');
+  const voiceDisplay = document.getElementById('voice-call-display');
+
+  if (type === 'video') {
+    if (remoteVideoEl) remoteVideoEl.style.display = 'block';
+    if (localPip) localPip.style.display = 'block';
+    if (voiceDisplay) voiceDisplay.style.display = 'none';
+  } else {
+    if (remoteVideoEl) remoteVideoEl.style.display = 'none';
+    if (localPip) localPip.style.display = 'none';
+    if (voiceDisplay) voiceDisplay.style.display = 'flex';
+  }
+
+  if (callState.timerInterval) clearInterval(callState.timerInterval);
+  callState.timerInterval = setInterval(() => {
+    callState.seconds++;
+    const formatted = formatCallTime(callState.seconds);
+    const timerDisplay = document.getElementById('call-timer-display');
+    if (timerDisplay) timerDisplay.textContent = formatted;
+    const headerTimer = document.getElementById('header-call-timer');
+    if (headerTimer) headerTimer.textContent = formatted;
+  }, 1000);
+}
+
+function formatCallTime(secs) {
+  const m = Math.floor(secs / 60).toString().padStart(2, '0');
+  const s = (secs % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function toggleCallMute() {
+  if (!callState.localStream) return;
+  callState.isMuted = !callState.isMuted;
+  callState.localStream.getAudioTracks().forEach(track => {
+    track.enabled = !callState.isMuted;
+  });
+  const muteBtn = document.getElementById('call-mute-btn');
+  const onIcon = document.getElementById('mute-icon-on');
+  const offIcon = document.getElementById('mute-icon-off');
+  if (muteBtn) muteBtn.classList.toggle('active-off', callState.isMuted);
+  if (onIcon) onIcon.style.display = callState.isMuted ? 'none' : 'block';
+  if (offIcon) offIcon.style.display = callState.isMuted ? 'block' : 'none';
+  showToast(callState.isMuted ? '🔇 Microphone muted' : '🎤 Microphone unmuted');
+}
+
+function toggleCallVideo() {
+  if (!callState.localStream) return;
+  callState.isVideoMuted = !callState.isVideoMuted;
+  callState.localStream.getVideoTracks().forEach(track => {
+    track.enabled = !callState.isVideoMuted;
+  });
+  const vidBtn = document.getElementById('call-video-toggle-btn');
+  if (vidBtn) vidBtn.classList.toggle('active-off', callState.isVideoMuted);
+  showToast(callState.isVideoMuted ? '📷 Camera turned off' : '📷 Camera turned on');
+}
+
+function cleanupCallUI() {
+  stopRingtone();
+  if (callState.timerInterval) {
+    clearInterval(callState.timerInterval);
+    callState.timerInterval = null;
+  }
+  if (callState.unsubscribeCall) {
+    try { callState.unsubscribeCall(); } catch (e) { }
+    callState.unsubscribeCall = null;
+  }
+  if (callState.peerConnection) {
+    try { callState.peerConnection.close(); } catch (e) { }
+    callState.peerConnection = null;
+  }
+  if (callState.localStream) {
+    try {
+      callState.localStream.getTracks().forEach(track => track.stop());
+    } catch (e) { }
+    callState.localStream = null;
+  }
+
+  callState.status = 'idle';
+  callState.callId = null;
+  callState.peerId = null;
+  callState.role = null;
+  callState.seconds = 0;
+
+  const overlay = document.getElementById('call-overlay');
+  const outgoingModal = document.getElementById('outgoing-call-modal');
+  const incomingModal = document.getElementById('incoming-call-modal');
+  const activeModal = document.getElementById('active-call-modal');
+
+  if (overlay) overlay.style.display = 'none';
+  if (outgoingModal) outgoingModal.style.display = 'none';
+  if (incomingModal) incomingModal.style.display = 'none';
+  if (activeModal) activeModal.style.display = 'none';
+
+  const timerDisplay = document.getElementById('call-timer-display');
+  if (timerDisplay) timerDisplay.textContent = '00:00';
+  const headerTimer = document.getElementById('header-call-timer');
+  if (headerTimer) headerTimer.textContent = '00:00';
 }
 
 // ─── INIT & BOOT ──────────────────────────────────────────────
 function init() {
-  // 1. Permanently purge any legacy dummy data (Sarah, Maya, Leo, Liam, Zoe, etc.) from storage
+  // 1. Permanently purge any legacy dummy data from storage
   purgeLegacyDummyData();
 
   // Theme initialization
@@ -1981,7 +3014,7 @@ function init() {
   // Attach event handlers
   attachEventListeners();
 
-  // Check user authentication session
+  // Check user authentication session & 15-minute timeout
   checkAuthSession();
 
   // Render initial views & dynamic member lists
@@ -2002,6 +3035,9 @@ function init() {
 
   // Connect to Firebase Cloud Database for multi-device sync
   initFirebase();
+
+  // Connect to .NET 8 SignalR Hub for real-time live messaging and calling
+  initSignalR();
 }
 
 // ─── Expose globals for inline handlers ──────────────────────
@@ -2035,6 +3071,16 @@ window.startChatWithUser = startChatWithUser;
 window.toggleFollowUser = toggleFollowUser;
 window.isFollowing = isFollowing;
 window.setFeedTab = setFeedTab;
+window.triggerSessionExpired = triggerSessionExpired;
+window.closeMobileChat = closeMobileChat;
+window.startVoiceCall = startVoiceCall;
+window.startVideoCall = startVideoCall;
+window.cancelOutgoingCall = cancelOutgoingCall;
+window.acceptCurrentIncomingCall = acceptCurrentIncomingCall;
+window.declineCurrentIncomingCall = declineCurrentIncomingCall;
+window.endActiveCall = endActiveCall;
+window.toggleCallMute = toggleCallMute;
+window.toggleCallVideo = toggleCallVideo;
 
 // ─── Boot ─────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);
