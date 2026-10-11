@@ -1539,7 +1539,9 @@ input,
 .messages-view {
   display: none;
   gap: 0;
-  height: calc(100vh - var(--nav-h) - 40px);
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
   border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid var(--border);
@@ -1549,7 +1551,12 @@ input,
 
 .messages-view.active {
   display: flex !important;
+  flex-direction: row !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  min-height: 0 !important;
   padding: 0;
+  overflow: hidden !important;
 }
 
 /* DM Sidebar */
@@ -1606,8 +1613,14 @@ input,
 }
 
 .dm-list {
-  flex: 1;
-  overflow-y: auto;
+  flex: 1 1 0% !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
 }
 
 .dm-item {
