@@ -3347,18 +3347,23 @@ body.light-theme .auth-error {
   /* On mobile by default: show DM list, hide chat panel */
   .messages-view {
     position: relative;
-    height: calc(100vh - 64px) !important;
-    max-height: calc(100vh - 64px) !important;
+    height: 100% !important;
+    max-height: 100% !important;
     min-height: 0 !important;
     overflow: hidden !important;
+    flex: 1 1 0% !important;
   }
 
   .msg-sidebar {
     width: 100% !important;
     max-width: 100% !important;
     height: 100% !important;
+    max-height: 100% !important;
+    min-height: 0 !important;
     display: flex !important;
+    flex-direction: column !important;
     border-right: none !important;
+    overflow: hidden !important;
   }
 
   .chat-panel {
@@ -3395,6 +3400,8 @@ body.light-theme .auth-error {
     padding: 8px 10px !important;
     gap: 6px !important;
     flex-shrink: 0 !important;
+    position: relative !important;
+    z-index: 10 !important;
   }
 }
 
