@@ -375,7 +375,10 @@ function saveNotifications(notifs) {
 
 function loadDMs() {
   try {
-    const saved = localStorage.getItem(userKey(STORAGE.DMS));
+    let saved = localStorage.getItem(userKey(STORAGE.DMS));
+    if (!saved) {
+      saved = localStorage.getItem(STORAGE.DMS);
+    }
     if (saved) {
       const dms = JSON.parse(saved);
       const clean = {};
@@ -392,6 +395,9 @@ function loadDMs() {
 
 function saveDMs(dms) {
   try {
+    if (state.currentUser) {
+      localStorage.setItem(userKey(STORAGE.DMS), JSON.stringify(dms));
+    }
     localStorage.setItem(STORAGE.DMS, JSON.stringify(dms));
   } catch (e) { }
 }

@@ -53,25 +53,47 @@ public class NexusHub : Hub
     // ─── LIVE MESSAGING ──────────────────────────────────────────
     public async Task SendLiveMessage(string toUserId, object messageData)
     {
-        if (ConnectionToUser.TryGetValue(Context.ConnectionId, out var fromUserId))
+        string? fromUserId = null;
+        if (!ConnectionToUser.TryGetValue(Context.ConnectionId, out fromUserId))
         {
-            // Send to recipient if connected
-            if (UserConnections.TryGetValue(toUserId, out var recipientConnections))
+            if (messageData is System.Text.Json.JsonElement elem && elem.TryGetProperty("from", out var fromProp))
             {
-                List<string> connList;
-                lock (recipientConnections)
+                fromUserId = fromProp.GetString();
+                if (!string.IsNullOrWhiteSpace(fromUserId))
                 {
-                    connList = recipientConnections.ToList();
-                }
-                foreach (var connId in connList)
-                {
-                    await Clients.Client(connId).SendAsync("ReceiveLiveMessage", fromUserId, messageData);
+                    ConnectionToUser[Context.ConnectionId] = fromUserId;
+                    var conns = UserConnections.GetOrAdd(fromUserId, _ => new HashSet<string>());
+                    lock (conns)
+                    {
+                        conns.Add(Context.ConnectionId);
+                    }
                 }
             }
-
-            // Acknowledge back to sender
-            await Clients.Caller.SendAsync("MessageSentAck", toUserId, messageData);
         }
+
+        fromUserId ??= "anonymous";
+
+        // Send to recipient if connected
+        if (UserConnections.TryGetValue(toUserId, out var recipientConnections))
+        {
+            List<string> connList;
+            lock (recipientConnections)
+            {
+                connList = recipientConnections.ToList();
+            }
+            foreach (var connId in connList)
+            {
+                await Clients.Client(connId).SendAsync("ReceiveLiveMessage", fromUserId, messageData);
+            }
+        }
+        else
+        {
+            // Deliver to any clients that might be listening for this user
+            await Clients.Others.SendAsync("ReceiveLiveMessage", fromUserId, messageData);
+        }
+
+        // Acknowledge back to sender
+        await Clients.Caller.SendAsync("MessageSentAck", toUserId, messageData);
     }
 
     // ─── WEBRTC CALL SIGNALING ───────────────────────────────────
