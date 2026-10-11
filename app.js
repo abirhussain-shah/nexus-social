@@ -33,6 +33,7 @@ function initFirebase() {
       listenToCloudUsers();
       listenToCloudPosts();
       listenToCloudMessages();
+      listenToCloudNotifications();
     }
   } catch (err) {
     console.warn('Firebase initialization warning:', err);
@@ -148,8 +149,19 @@ function handleIncomingLiveMessage(fromUserId, messageData) {
         scrollChatToBottom();
       }
     } else {
-      const senderName = USERS[fromUserId]?.name || 'Member';
-      showToast(`💬 ${senderName}: ${formattedMsg.text.slice(0, 32)}`);
+      const sender = USERS[fromUserId] || { name: 'Member' };
+      showToast(`💬 ${sender.name}: ${formattedMsg.text.slice(0, 32)}`);
+      addNotification({
+        type: 'message',
+        actorId: fromUserId,
+        actorName: sender.name,
+        actorGradient: sender.gradient,
+        actorInitials: sender.initials,
+        targetId: fromUserId,
+        text: `sent you a message: "${formattedMsg.text.slice(0, 30)}..."`,
+        time: formattedMsg.time || 'Just now',
+        timestamp: formattedMsg.timestamp || Date.now()
+      });
     }
 
     renderDMUserList();
@@ -175,7 +187,8 @@ const STORAGE = {
   SAVED: 'nexus_saved_db',
   THEME: 'nexus-theme',
   DM_SETTINGS: 'nexus_dm_settings',
-  FOLLOWING: 'nexus_following_db'
+  FOLLOWING: 'nexus_following_db',
+  NOTIFS: 'nexus_notifications_db'
 };
 
 const SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes inactivity timeout
@@ -268,7 +281,8 @@ const state = {
   dmSettings: {}, // { [userId]: { muted: bool, deleted: bool, unread: bool } }
   following: [], // [userId, ...]
   feedTab: 'all', // 'all' | 'following'
-  viewingProfileUserId: null // null = own profile, otherwise userId
+  viewingProfileUserId: null, // null = own profile, otherwise userId
+  notifications: []
 };
 
 // ─── Seed Posts & DMs ─────────────────────────────────────────
@@ -322,7 +336,41 @@ function userKey(base) {
 function reloadUserScopedData() {
   state.dmMessages = state.currentUser ? loadDMs() : {};
   state.dmSettings = state.currentUser ? loadDMSettings() : {};
+  state.notifications = state.currentUser ? loadNotifications() : [];
   state.activeDM = null;
+
+  // Provide initial welcome notification if empty
+  if (state.currentUser && state.notifications.length === 0) {
+    state.notifications.push({
+      id: 'welcome_nexus_' + state.currentUser.id,
+      type: 'system',
+      actorName: 'Nexus Social',
+      actorGradient: 'linear-gradient(135deg,#7c6ff7,#06b6d4)',
+      actorInitials: 'N',
+      targetId: null,
+      text: 'Welcome to Nexus Social! Click any notification to jump directly to that post, profile, or message.',
+      time: 'Just now',
+      timestamp: Date.now(),
+      read: false
+    });
+    saveNotifications(state.notifications);
+  }
+
+  renderNotifications();
+}
+
+function loadNotifications() {
+  try {
+    const saved = localStorage.getItem(userKey(STORAGE.NOTIFS));
+    if (saved) return JSON.parse(saved);
+  } catch (e) { }
+  return [];
+}
+
+function saveNotifications(notifs) {
+  try {
+    localStorage.setItem(userKey(STORAGE.NOTIFS), JSON.stringify(notifs));
+  } catch (e) { }
 }
 
 function loadDMs() {
@@ -1244,6 +1292,55 @@ function listenToCloudPosts() {
         const hasStructuralChange = (state.posts.length !== previousPosts.length) ||
           state.posts.some(p => !prevIds.has(p.id));
 
+        // Check for new incoming likes or comments on current user's posts
+        const currentId = state.currentUser ? state.currentUser.id : null;
+        if (currentId && previousPosts.length > 0) {
+          cloudPosts.forEach(cp => {
+            if (cp.user === currentId) {
+              const prev = previousPosts.find(p => p.id === cp.id);
+              if (prev) {
+                // New likes by other users
+                const newLikers = (cp.likedBy || []).filter(u => u !== currentId && !(prev.likedBy || []).includes(u));
+                newLikers.forEach(uid => {
+                  const actor = USERS[uid] || { name: 'Someone' };
+                  addNotification({
+                    type: 'like',
+                    actorId: uid,
+                    actorName: actor.name,
+                    actorGradient: actor.gradient,
+                    actorInitials: actor.initials,
+                    targetId: cp.id,
+                    text: `liked your post: "${(cp.title || cp.text).slice(0, 30)}..."`,
+                    time: 'Just now',
+                    timestamp: Date.now()
+                  });
+                });
+
+                // New comments by other users
+                if ((cp.comments || []).length > (prev.comments || []).length) {
+                  const newComments = (cp.comments || []).slice((prev.comments || []).length);
+                  newComments.forEach(c => {
+                    if (c.user !== currentId) {
+                      const actor = USERS[c.user] || { name: 'Someone' };
+                      addNotification({
+                        type: 'comment',
+                        actorId: c.user,
+                        actorName: actor.name,
+                        actorGradient: actor.gradient,
+                        actorInitials: actor.initials,
+                        targetId: cp.id,
+                        text: `commented: "${c.text.slice(0, 30)}..."`,
+                        time: c.time || 'Just now',
+                        timestamp: c.timestamp || Date.now()
+                      });
+                    }
+                  });
+                }
+              }
+            }
+          });
+        }
+
         if (hasStructuralChange) {
           // If a post was added or removed, re-render the feed
           renderFeed();
@@ -1290,7 +1387,19 @@ function listenToCloudMessages() {
             if (peer === state.activeDM) {
               hasUpdateForActive = true;
             } else {
-              showToast(`💬 New message from ${USERS[peer]?.name || 'a member'}`);
+              const sender = USERS[peer] || { name: 'Member' };
+              showToast(`💬 New message from ${sender.name}`);
+              addNotification({
+                type: 'message',
+                actorId: peer,
+                actorName: sender.name,
+                actorGradient: sender.gradient,
+                actorInitials: sender.initials,
+                targetId: peer,
+                text: `sent you a message: "${msg.text.slice(0, 30)}..."`,
+                time: msg.time || 'Just now',
+                timestamp: msg.timestamp || Date.now()
+              });
             }
           }
         }
@@ -1304,6 +1413,44 @@ function listenToCloudMessages() {
     }, err => {
       console.warn('Firestore messages subscription warning:', err);
     });
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
+function listenToCloudNotifications() {
+  if (!db) return;
+  try {
+    const currentId = state.currentUser ? state.currentUser.id : null;
+    if (!currentId) return;
+
+    db.collection('notifications')
+      .where('to', '==', currentId)
+      .orderBy('timestamp', 'desc')
+      .limit(30)
+      .onSnapshot(snapshot => {
+        if (snapshot.empty) return;
+        snapshot.forEach(doc => {
+          const d = doc.data();
+          if (d && d.actorId !== currentId) {
+            const actor = (d.actorId && USERS[d.actorId]) ? USERS[d.actorId] : { name: d.actorName || 'Member' };
+            addNotification({
+              id: doc.id,
+              type: d.type || 'system',
+              actorId: d.actorId,
+              actorName: actor.name,
+              actorGradient: actor.gradient,
+              actorInitials: actor.initials,
+              targetId: d.targetId || d.actorId,
+              text: d.text || '',
+              time: d.time || 'Just now',
+              timestamp: d.timestamp || Date.now()
+            });
+          }
+        });
+      }, err => {
+        console.warn('Notifications subscription notice:', err);
+      });
   } catch (e) {
     console.warn(e);
   }
@@ -2123,7 +2270,174 @@ function showToast(msg, type = '') {
 function toggleNotifPanel() {
   const visible = notifPanel.style.display !== 'none';
   notifPanel.style.display = visible ? 'none' : 'block';
-  document.getElementById('notif-dot').style.display = visible ? '' : 'none';
+  if (!visible) {
+    renderNotifications();
+  }
+}
+
+function addNotification(notif) {
+  if (!state.currentUser) return;
+  const item = {
+    id: notif.id || 'notif_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+    type: notif.type || 'system', // 'like' | 'comment' | 'follow' | 'message' | 'system'
+    actorId: notif.actorId || null,
+    actorName: notif.actorName || 'Someone',
+    actorGradient: notif.actorGradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)',
+    actorInitials: notif.actorInitials || (notif.actorName ? notif.actorName.slice(0, 2).toUpperCase() : 'U'),
+    targetId: notif.targetId || null, // postId or userId
+    text: notif.text || '',
+    time: notif.time || 'Just now',
+    timestamp: notif.timestamp || Date.now(),
+    read: false
+  };
+
+  // Avoid duplicate notifications for identical action within 30 seconds
+  const isDuplicate = state.notifications.some(n =>
+    n.type === item.type &&
+    n.actorId === item.actorId &&
+    n.targetId === item.targetId &&
+    Math.abs(n.timestamp - item.timestamp) < 30000
+  );
+  if (isDuplicate) return;
+
+  state.notifications.unshift(item);
+  if (state.notifications.length > 40) state.notifications.pop();
+  saveNotifications(state.notifications);
+  renderNotifications();
+
+  // If panel is closed, show a gentle toast popup
+  if (notifPanel && notifPanel.style.display === 'none') {
+    showToast(`🔔 ${item.actorName} ${item.text}`);
+  }
+}
+
+function renderNotifications() {
+  const notifList = document.getElementById('notif-list');
+  const notifDot = document.getElementById('notif-dot');
+  if (!notifList) return;
+
+  const unreadCount = state.notifications.filter(n => !n.read).length;
+
+  // Sync bell badge
+  if (notifDot) {
+    if (unreadCount > 0) {
+      notifDot.style.display = 'flex';
+      notifDot.textContent = unreadCount > 9 ? '9+' : unreadCount.toString();
+    } else {
+      notifDot.style.display = 'none';
+      notifDot.textContent = '';
+    }
+  }
+
+  // Update header text in dropdown
+  const headerTitle = document.querySelector('.notif-panel-header h3');
+  if (headerTitle) {
+    headerTitle.textContent = unreadCount > 0 ? `Notifications (${unreadCount})` : 'Notifications';
+  }
+
+  notifList.innerHTML = '';
+
+  if (state.notifications.length === 0) {
+    notifList.innerHTML = `
+      <li style="padding:32px 16px;text-align:center;color:var(--text-3);font-size:13px;">
+        <div style="font-size:28px;margin-bottom:8px;">🔔</div>
+        <div style="font-weight:600;color:var(--text-2);margin-bottom:4px;">No notifications yet</div>
+        <p style="font-size:12px;margin:0;">When people like your posts, comment, follow, or message you, they'll appear here!</p>
+      </li>`;
+    return;
+  }
+
+  state.notifications.forEach(notif => {
+    const li = document.createElement('li');
+    li.className = `notif-item ${notif.read ? '' : 'unread'}`;
+    li.id = 'notif-item-' + notif.id;
+
+    let badgeIcon = '🔔';
+    if (notif.type === 'like') badgeIcon = '❤️';
+    else if (notif.type === 'comment') badgeIcon = '💬';
+    else if (notif.type === 'follow') badgeIcon = '✨';
+    else if (notif.type === 'message') badgeIcon = '✉️';
+
+    let actionBtnHtml = '';
+    if (notif.type === 'follow' && notif.actorId && !isFollowing(notif.actorId)) {
+      actionBtnHtml = `
+        <button type="button" class="btn-primary" style="margin-top:6px;padding:3px 12px;font-size:11px;border-radius:99px;" onclick="event.stopPropagation(); toggleFollowUser('${notif.actorId}', this);">
+          Follow Back
+        </button>
+      `;
+    }
+
+    li.innerHTML = `
+      <div style="position:relative;flex-shrink:0;">
+        <div class="notif-avatar" style="background:${notif.actorGradient || 'linear-gradient(135deg,#8b5cf6,#ec4899)'};">${notif.actorInitials || 'U'}</div>
+        <span style="position:absolute;bottom:-3px;right:-3px;font-size:11px;background:var(--bg-card);border-radius:50%;padding:1px;box-shadow:0 1px 3px rgba(0,0,0,0.3);">${badgeIcon}</span>
+      </div>
+      <div class="notif-body" style="flex:1;">
+        <span class="notif-who">${esc(notif.actorName)}</span> ${esc(notif.text)}
+        ${actionBtnHtml}
+        <span class="notif-time">${notif.time || 'Just now'}</span>
+      </div>
+    `;
+
+    li.addEventListener('click', () => handleNotificationClick(notif.id));
+    notifList.appendChild(li);
+  });
+}
+
+function handleNotificationClick(notifId) {
+  const notif = state.notifications.find(n => n.id === notifId);
+  if (!notif) return;
+
+  // Mark this notification as read
+  notif.read = true;
+  saveNotifications(state.notifications);
+  renderNotifications();
+
+  // Dismiss dropdown
+  if (notifPanel) notifPanel.style.display = 'none';
+
+  if (notif.type === 'like' || notif.type === 'comment') {
+    // Navigate to feed and scroll directly to post
+    switchView('feed');
+    setTimeout(() => {
+      const postEl = document.getElementById('post-' + notif.targetId);
+      if (postEl) {
+        postEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        postEl.classList.remove('post-highlight-pulse');
+        void postEl.offsetWidth;
+        postEl.classList.add('post-highlight-pulse');
+
+        if (notif.type === 'comment') {
+          const post = state.posts.find(p => p.id === notif.targetId);
+          if (post && !post.showComments) {
+            toggleComments(notif.targetId);
+          }
+          const commentInput = document.getElementById('ci-' + notif.targetId);
+          if (commentInput) commentInput.focus();
+        }
+      }
+    }, 200);
+  } else if (notif.type === 'follow') {
+    // Navigate to user's profile
+    if (notif.actorId) {
+      viewUserProfile(notif.actorId, true);
+    }
+  } else if (notif.type === 'message') {
+    // Navigate to chat with this user
+    if (notif.actorId) {
+      startChatWithUser(notif.actorId);
+    }
+  } else {
+    // Default system notification -> Feed
+    switchView('feed');
+  }
+}
+
+function markAllNotificationsRead() {
+  state.notifications.forEach(n => n.read = true);
+  saveNotifications(state.notifications);
+  renderNotifications();
+  showToast('✅ All notifications marked as read');
 }
 
 
@@ -2190,11 +2504,7 @@ function attachEventListeners() {
 
   // Notifications
   document.getElementById('notif-btn').addEventListener('click', toggleNotifPanel);
-  document.getElementById('mark-all-btn').addEventListener('click', () => {
-    document.querySelectorAll('.notif-item.unread').forEach(el => el.classList.remove('unread'));
-    document.getElementById('notif-dot').style.display = 'none';
-    showToast('✅ All notifications marked as read');
-  });
+  document.getElementById('mark-all-btn').addEventListener('click', markAllNotificationsRead);
 
   // Photo upload area
   const photoDropArea = document.getElementById('photo-drop-area');
